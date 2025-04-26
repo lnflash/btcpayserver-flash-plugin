@@ -1,0 +1,38 @@
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    var storeId = Model.StoreId;
+    if (Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+       const customNodeAccordian = document.getElementById("CustomNodeSupport");
+       const template = document.getElementById("flash");
+       customNodeAccordian.appendChild(template.content.cloneNode(true));
+    });
+</script>
+
+<template id="flash">
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="CustomFlashHeader">
+            <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomFlashContent" aria-controls="CustomFlashContent" aria-expanded="false">
+                <span><strong>Flash</strong> via GraphQL</span>
+                <vc:icon symbol="caret-down"/>
+            </button>
+        </h2>
+        <div id="CustomFlashContent" class="accordion-collapse collapse" aria-labelledby="CustomFlashHeader" data-bs-parent="#CustomNodeSupport">
+            <div class="accordion-body">
+                <ul class="pb-2">
+                    <li>
+                        <code><b>type=</b>flash;<b>server=</b>https://api.flashapp.me/graphql;<b>api-key</b>=flash_...;<b>wallet-id=</b>xyz</code>
+                    </li>
+                </ul>
+                <p class="my-2">Head over to the <a href="https://dashboard.flashapp.me" target="_blank" rel="noreferrer noopener">Flash dashboard</a> and create an API key. The server is optional and will use the default Flash instance. The wallet-id is optional and will use the default wallet otherwise.</p>
+                <p class="my-2">To enable Flash NFC card support, you'll need to set up the Flash Card Factory app from your BTCPay Server dashboard under "Apps".</p>
+            </div>
+        </div>
+    </div>
+</template>

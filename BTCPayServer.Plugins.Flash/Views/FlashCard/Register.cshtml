@@ -1,0 +1,104 @@
+@{
+    ViewData["Title"] = "Register Flash Card";
+}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <h2 class="mb-0 flex-grow-1">Register Flash Card</h2>
+    <a asp-action="Index" class="btn btn-secondary">
+        <i class="fa fa-arrow-left"></i> Back to Cards
+    </a>
+</div>
+
+<form method="post" asp-action="Register">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Card Details</h3>
+        </div>
+        <div class="card-body">
+            <div class="form-group mb-4">
+                <label class="form-label" for="cardName">Card Name</label>
+                <input type="text" class="form-control" id="cardName" name="cardName" placeholder="My Flash Card" required>
+                <span class="text-muted">A friendly name to identify this card</span>
+                <span class="text-danger field-validation-valid" data-valmsg-for="cardName" data-valmsg-replace="true"></span>
+            </div>
+            
+            <div class="form-group mb-4">
+                <label class="form-label">Card UID</label>
+                <div class="d-flex gap-2">
+                    <input type="text" class="form-control" id="cardUid" name="cardUid" placeholder="Scan card or enter UID manually" required>
+                    <button type="button" id="scanBtn" class="btn btn-primary">
+                        <i class="fa fa-credit-card"></i> Scan
+                    </button>
+                </div>
+                <span class="text-muted">The unique ID of the NFC card</span>
+                <span class="text-danger field-validation-valid" data-valmsg-for="cardUid" data-valmsg-replace="true"></span>
+            </div>
+            
+            <div class="form-group mb-4">
+                <label class="form-label" for="initialBalance">Initial Balance (sats)</label>
+                <input type="number" class="form-control" id="initialBalance" name="initialBalance" placeholder="1000" min="0">
+                <span class="text-muted">Initial balance to fund the card with (optional)</span>
+            </div>
+            
+            <div id="nfcStatus" class="alert alert-info d-none">
+                <i class="fa fa-info-circle"></i> 
+                <span id="nfcStatusText">Place your NFC card on the reader</span>
+            </div>
+        </div>
+        <div class="card-footer">
+            <button type="submit" class="btn btn-primary">Register Card</button>
+            <a asp-action="Index" class="btn btn-secondary">Cancel</a>
+        </div>
+    </div>
+</form>
+
+@section Scripts {
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const scanBtn = document.getElementById('scanBtn');
+            const nfcStatus = document.getElementById('nfcStatus');
+            const nfcStatusText = document.getElementById('nfcStatusText');
+            const cardUidInput = document.getElementById('cardUid');
+            
+            scanBtn.addEventListener('click', async function() {
+                nfcStatus.classList.remove('d-none');
+                nfcStatusText.textContent = 'Initializing NFC reader...';
+                
+                try {
+                    if ('NDEFReader' in window) {
+                        const reader = new NDEFReader();
+                        
+                        try {
+                            await reader.scan();
+                            nfcStatusText.textContent = 'NFC reader ready. Place your card on the reader.';
+                            
+                            reader.addEventListener('reading', event => {
+                                const uid = Array.from(event.serialNumber)
+                                    .map(b => b.toString(16).padStart(2, '0'))
+                                    .join('');
+                                    
+                                cardUidInput.value = uid;
+                                nfcStatusText.textContent = `Card detected! UID: ${uid}`;
+                                nfcStatus.classList.remove('alert-info');
+                                nfcStatus.classList.add('alert-success');
+                            });
+                            
+                        } catch (error) {
+                            nfcStatusText.textContent = `Error starting NFC reader: ${error.message}`;
+                            nfcStatus.classList.remove('alert-info');
+                            nfcStatus.classList.add('alert-danger');
+                        }
+                    } else {
+                        nfcStatusText.textContent = 'NFC reading is not supported in this browser. Please enter the card UID manually.';
+                        nfcStatus.classList.remove('alert-info');
+                        nfcStatus.classList.add('alert-warning');
+                    }
+                } catch (error) {
+                    nfcStatusText.textContent = `Error: ${error.message}`;
+                    nfcStatus.classList.remove('alert-info');
+                    nfcStatus.classList.add('alert-danger');
+                }
+            });
+        });
+    </script>
+}

@@ -1,0 +1,88 @@
+@model IEnumerable<CardRegistration>
+@{
+    ViewData["Title"] = "Flash Cards";
+}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <h2 class="mb-0 flex-grow-1">Flash Cards</h2>
+    <a asp-action="Register" class="btn btn-primary">
+        <i class="fa fa-plus"></i> Register New Card
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Registered Cards</h3>
+    </div>
+    <div class="card-body">
+        @if (!Model.Any())
+        {
+            <div class="text-center my-5">
+                <h4>No Flash cards registered yet</h4>
+                <p class="text-muted">Register your first Flash card to get started</p>
+                <a asp-action="Register" class="btn btn-primary mt-3">
+                    <i class="fa fa-plus"></i> Register New Card
+                </a>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Card Name</th>
+                            <th>Card UID</th>
+                            <th>Created</th>
+                            <th>Last Used</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var card in Model)
+                        {
+                            <tr>
+                                <td>@card.CardName</td>
+                                <td>@card.CardUID</td>
+                                <td>@card.CreatedAt.ToLocalTime().ToString("g")</td>
+                                <td>@(card.LastUsedAt?.ToLocalTime().ToString("g") ?? "Never")</td>
+                                <td>
+                                    @if (card.IsBlocked)
+                                    {
+                                        <span class="badge bg-danger">Blocked</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-success">Active</span>
+                                    }
+                                </td>
+                                <td>
+                                    <a asp-action="Details" asp-route-id="@card.Id" class="btn btn-link p-0">
+                                        <i class="fa fa-eye"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h3 class="card-title">Flash Card Setup Guide</h3>
+    </div>
+    <div class="card-body">
+        <p>Flash cards are NFC cards that can be used for Lightning payments with your Flash wallet.</p>
+        <p>To use Flash cards with BTCPay Server:</p>
+        <ol>
+            <li>Register a card using the button above</li>
+            <li>Program the card with the provided keys</li>
+            <li>Test the card by tapping it on an NFC reader</li>
+        </ol>
+        <p>For more information, see the <a href="https://docs.flashapp.me" target="_blank">Flash documentation</a>.</p>
+    </div>
+</div>

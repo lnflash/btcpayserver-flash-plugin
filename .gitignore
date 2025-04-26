@@ -1,0 +1,44 @@
+# Build output
+bin/
+obj/
+out/
+
+# Visual Studio / Visual Studio Code files
+.vs/
+.vscode/
+*.userprefs
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+*.dll.config
+*.cache
+*.txt
+*.swp
+*.*~
+
+# NuGet packages
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+*.nuget.props
+*.nuget.targets
+
+# MSTest test Results
+TestResults/
+
+# .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Misc
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Template plugin directory (not part of our project)
+BTCPayServer.Plugins.Template/
