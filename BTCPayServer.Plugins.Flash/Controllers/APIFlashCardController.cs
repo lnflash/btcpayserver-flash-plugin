@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Client;
 using BTCPayServer.HostedServices;
@@ -54,7 +55,7 @@ namespace BTCPayServer.Plugins.Flash.Controllers
         }
         
         [HttpPost("register")]
-        [Authorize(AuthenticationSchemes = AuthenticationSchemes.ApiKey)]
+        [Authorize(AuthenticationSchemes = AuthenticationSchemes.GreenfieldAPIKeys)]
         public async Task<IActionResult> RegisterCard([FromBody] RegisterCardRequest request)
         {
             // Get the store ID from the API key
@@ -115,7 +116,8 @@ namespace BTCPayServer.Plugins.Flash.Controllers
                     return NotFound(new { error = "Card not registered" });
                     
                 // Dispatch a card tap event to be processed by the hosted service
-                await _eventAggregator.Publish(new CardTapEvent
+                // The event aggregator's Publish method is void, so don't await it
+                _eventAggregator.Publish(new CardTapEvent
                 {
                     CardUid = request.CardUID,
                     Amount = request.Amount,

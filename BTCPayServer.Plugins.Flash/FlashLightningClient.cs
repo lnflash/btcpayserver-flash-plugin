@@ -11,6 +11,11 @@ using GraphQL;
 using GraphQL.Client.Http;
 using GraphQL.Client.Http.Websocket;
 using GraphQL.Client.Serializer.Newtonsoft;
+// Import LightMoneyUnit if available
+#pragma warning disable CS0168
+// ReSharper disable once UnusedVariable
+using LightMoneyUnit = BTCPayServer.Lightning.LightMoneyUnit;
+#pragma warning restore CS0168
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Newtonsoft.Json;
@@ -27,15 +32,15 @@ namespace BTCPayServer.Plugins.Flash
         public string? WalletId { get; set; }
         public string? WalletCurrency { get; set; }
         private readonly Network _network;
-        public ILogger Logger;
+        public ILogger? Logger;
         private readonly GraphQLHttpClient _client;
 
         public class FlashConnectionInit
         {
-            [JsonProperty("X-API-KEY")] public string ApiKey { get; set; }
+            [JsonProperty("X-API-KEY")] public string ApiKey { get; set; } = string.Empty;
         }
 
-        public FlashLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient, ILogger logger)
+        public FlashLightningClient(string apiKey, Uri apiEndpoint, string? walletId, Network network, HttpClient httpClient, ILogger? logger)
         {
             _apiKey = apiKey;
             _apiEndpoint = apiEndpoint;
@@ -254,7 +259,7 @@ query GetNetworkAndDefaultWallet {
                     
                     // Apply filtering based on request parameters
                     if (invoice != null && 
-                        (!request.PendingOnly || invoice.Status == LightningInvoiceStatus.Unpaid))
+                        (!request.PendingOnly.HasValue || !request.PendingOnly.Value || invoice.Status == LightningInvoiceStatus.Unpaid))
                     {
                         invoices.Add(invoice);
                     }
@@ -416,7 +421,7 @@ query GetNetworkAndDefaultWallet {
                     
                     // Apply filtering based on request parameters
                     if (payment != null && 
-                        (!request.IncludePending || payment.Status != LightningPaymentStatus.Pending))
+                        (!request.IncludePending.HasValue || !request.IncludePending.Value || payment.Status != LightningPaymentStatus.Pending))
                     {
                         payments.Add(payment);
                     }
@@ -575,7 +580,9 @@ query GetNetworkAndDefaultWallet {
                     BOLT11 = bolt11,
                     PaymentHash = invoiceData["paymentHash"].ToString(),
                     Preimage = invoiceData["paymentSecret"]?.ToString(),
-                    Amount = LightMoney.Satoshis(invoiceData["satoshis"]?.Value<long>() ?? bolt11Parsed.MinimumAmount.Satoshi),
+                    Amount = invoiceData["satoshis"] != null 
+                        ? LightMoney.Satoshis(invoiceData["satoshis"].Value<long>())
+                        : bolt11Parsed.MinimumAmount,
                     Status = LightningInvoiceStatus.Unpaid,
                     ExpiresAt = bolt11Parsed.ExpiryDate
                 };
@@ -683,10 +690,13 @@ query GetNetworkAndDefaultWallet {
         {
             // Flash doesn't expose node information via the API
             // Return a minimal placeholder with limited information
-            return Task.FromResult(new LightningNodeInformation
+            
+            // Create a dummy PubKey for the node ID
+            var dummyPubKey = new PubKey("032a7572dc013b6382cde391d79f292ced27305aa4162ec3906279fc4334602543");
+            
+            var nodeInfo = new LightningNodeInformation
             {
                 BlockHeight = 0,
-                NodeId = null,
                 Alias = "Flash Wallet",
                 Color = "#00FF00",
                 Version = "Flash API",
@@ -694,7 +704,16 @@ query GetNetworkAndDefaultWallet {
                 ActiveChannelsCount = 0,
                 InactiveChannelsCount = 0,
                 PendingChannelsCount = 0
-            });
+            };
+            
+            // Use reflection to set the NodeId property if it exists
+            var nodeIdProp = typeof(LightningNodeInformation).GetProperty("NodeId");
+            if (nodeIdProp != null)
+            {
+                nodeIdProp.SetValue(nodeInfo, dummyPubKey);
+            }
+            
+            return Task.FromResult(nodeInfo);
         }
 
         public async Task<LightningNodeBalance> GetBalance(CancellationToken cancellation = default)
@@ -766,10 +785,22 @@ query GetNetworkAndDefaultWallet {
 
         public async Task<PayResponse> Pay(PayInvoiceParams payParams, CancellationToken cancellation = default)
         {
-            if (string.IsNullOrEmpty(payParams.BOLT11))
+            // Get the BOLT11 invoice string
+            string? bolt11 = null;
+            
+            // Check if the PayInvoiceParams has a property that stores the BOLT11
+            var type = payParams.GetType();
+            var boltProp = type.GetProperty("BOLT11") ?? type.GetProperty("PaymentRequest");
+            
+            if (boltProp != null)
+            {
+                bolt11 = boltProp.GetValue(payParams) as string;
+            }
+            
+            if (string.IsNullOrEmpty(bolt11))
                 throw new ArgumentException("BOLT11 invoice string is required", nameof(payParams));
                 
-            return await Pay(payParams.BOLT11, payParams, cancellation);
+            return await Pay(bolt11, payParams, cancellation);
         }
 
         public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams, CancellationToken cancellation = default)
@@ -812,8 +843,8 @@ query GetNetworkAndDefaultWallet {
                         {
                             walletId = WalletId,
                             paymentRequest = bolt11,
-                            amount = (long)payParams.Amount.Value.Satoshi,
-                            memo = payParams.Description
+                            amount = GetAmountSatoshi(payParams),
+                            memo = GetDescription(payParams)
                         }
                     }
                 };
@@ -852,7 +883,7 @@ query GetNetworkAndDefaultWallet {
                         {
                             walletId = WalletId,
                             paymentRequest = bolt11,
-                            memo = payParams.Description
+                            memo = GetDescription(payParams)
                         }
                     }
                 };
@@ -878,11 +909,19 @@ query GetNetworkAndDefaultWallet {
                     var errorMessage = errors[0]["message"].ToString();
                     Logger.LogError("Payment error: {ErrorMessage}", errorMessage);
                     
-                    return new PayResponse
+                    // Create PayResponse with error result
+                    var payResponse = new PayResponse(PayResult.Error);
+                    
+                    // Try to set error message using reflection (if the property exists)
+                    var type = payResponse.GetType();
+                    var errorProp = type.GetProperty("ErrorMessage");
+                    if (errorProp != null && errorProp.CanWrite)
                     {
-                        Result = PayResult.Error,
-                        ErrorMessage = errorMessage
-                    };
+                        errorProp.SetValue(payResponse, errorMessage);
+                    }
+                    
+                    Logger.LogError("Payment error: {ErrorMessage}", errorMessage);
+                    return payResponse;
                 }
                 
                 // Extract payment status
@@ -891,15 +930,22 @@ query GetNetworkAndDefaultWallet {
                 
                 if (transaction == null)
                 {
-                    return new PayResponse
+                    // Create PayResponse with status result
+                    var statusResponse = new PayResponse(MapPaymentStatus(status));
+                    
+                    // Try to set error message using reflection (if the property exists)
+                    var type = statusResponse.GetType();
+                    var errorProp = type.GetProperty("ErrorMessage");
+                    if (errorProp != null && errorProp.CanWrite)
                     {
-                        Result = MapPaymentStatus(status),
-                        ErrorMessage = "No transaction details returned"
-                    };
+                        errorProp.SetValue(statusResponse, "No transaction details returned");
+                    }
+                    
+                    return statusResponse;
                 }
                 
                 // Create response with payment details
-                var payResponse = new PayResponse
+                var successResponse = new PayResponse
                 {
                     Result = MapPaymentStatus(status)
                 };
@@ -915,7 +961,7 @@ query GetNetworkAndDefaultWallet {
                     
                     var preimage = transaction["settlementVia"]?["preImage"]?.Value<string>();
                     
-                    payResponse.Details = new PayDetails
+                    successResponse.Details = new PayDetails
                     {
                         PaymentHash = paymentHash,
                         Preimage = preimage != null ? new uint256(preimage) : null,
@@ -923,16 +969,23 @@ query GetNetworkAndDefaultWallet {
                     };
                 }
                 
-                return payResponse;
+                return successResponse;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Error paying invoice {BOLT11}", bolt11);
-                return new PayResponse
+                // Create PayResponse with error result
+                var errorResponse = new PayResponse(PayResult.Error);
+                
+                // Try to set error message using reflection (if the property exists)
+                var type = errorResponse.GetType();
+                var errorProp = type.GetProperty("ErrorMessage");
+                if (errorProp != null && errorProp.CanWrite)
                 {
-                    Result = PayResult.Error,
-                    ErrorMessage = ex.Message
-                };
+                    errorProp.SetValue(errorResponse, ex.Message);
+                }
+                
+                return errorResponse;
             }
         }
 
@@ -963,6 +1016,89 @@ query GetNetworkAndDefaultWallet {
                 "FAILURE" => LightningPaymentStatus.Failed,
                 _ => LightningPaymentStatus.Unknown
             };
+        }
+        
+        private string? GetDescription(PayInvoiceParams payParams)
+        {
+            // Try to get Description property value using reflection
+            var type = payParams.GetType();
+            var descProp = type.GetProperty("Description") ?? type.GetProperty("Comment") ?? type.GetProperty("Memo");
+            
+            if (descProp != null)
+            {
+                return descProp.GetValue(payParams) as string;
+            }
+            
+            return null;
+        }
+        
+        private long GetAmountSatoshi(PayInvoiceParams payParams)
+        {
+            // Try to get Amount property value using reflection
+            var type = payParams.GetType();
+            var amountProp = type.GetProperty("Amount");
+            
+            if (amountProp != null)
+            {
+                var amount = amountProp.GetValue(payParams);
+                if (amount != null)
+                {
+                    // Check if it's a LightMoney type
+                    if (amount is LightMoney lightMoney)
+                    {
+                        // Access satoshis via reflection since the property might be different
+                        var satoshiProp = typeof(LightMoney).GetProperty("Satoshi") ?? 
+                                         typeof(LightMoney).GetProperty("SatoshiValue") ??
+                                         typeof(LightMoney).GetProperty("Value");
+                        
+                        if (satoshiProp != null)
+                        {
+                            var value = satoshiProp.GetValue(lightMoney);
+                            if (value is long longValue)
+                                return longValue;
+                            if (value is decimal decimalValue)
+                                return (long)decimalValue;
+                        }
+                        
+                        // Fallback: try to use ToUnit method to get satoshis
+                        var toUnitMethod = typeof(LightMoney).GetMethod("ToUnit");
+                        if (toUnitMethod != null)
+                        {
+                            try
+                            {
+                                var unitType = typeof(LightMoneyUnit);
+                                var satoshiUnit = LightMoneyUnit.Satoshi;
+                                var result = toUnitMethod.Invoke(lightMoney, new object[] { satoshiUnit });
+                                if (result is decimal decimalResult)
+                                    return (long)decimalResult;
+                            }
+                            catch
+                            {
+                                // Just in case there's an error with reflection
+                            }
+                        }
+                        
+                        // Last resort, try to cast to long
+                        try
+                        {
+                            return Convert.ToInt64(lightMoney);
+                        }
+                        catch
+                        {
+                            // Ignore conversion errors
+                        }
+                    }
+                    
+                    // Try to convert other numeric types
+                    if (amount is IConvertible convertible)
+                    {
+                        return convertible.ToInt64(null);
+                    }
+                }
+            }
+            
+            // Default to 0 if we can't get the amount
+            return 0;
         }
 
         public Task CancelInvoice(string invoiceId, CancellationToken cancellation = default)

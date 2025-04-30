@@ -1,0 +1,1 @@
+{"Identifier":"BTCPayServer.Plugins.Flash","Name":"Flash","Version":"1.0.0.0","Description":"Flash Lightning support and NFC card integration","SystemPlugin":false,"Dependencies":[{"Identifier":"BTCPayServer","Condition":"\u003E=2.1.0"}]}

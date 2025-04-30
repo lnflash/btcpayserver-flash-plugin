@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins.Flash.Data;
 using BTCPayServer.Plugins.Flash.Data.Models;
@@ -91,8 +93,23 @@ namespace BTCPayServer.Plugins.Flash.Services
                 return false;
                 
             // Check if the pull payment has remaining funds
-            var blob = pullPayment.GetBlob();
-            var remaining = blob.Limit - await _pullPaymentService.GetPayoutAmountForPullPayment(card.PullPaymentId);
+            // We need to calculate this ourselves since GetPayoutAmountForPullPayment isn't available
+            
+            // Calculate total amount of payouts for this pull payment
+            // Logic based on similar code in PullPaymentHostedService.HandleCreatePayout
+            var payoutsRaw = await context.Set<BTCPayServer.Data.PayoutData>()
+                .Where(p => p.PullPaymentDataId == card.PullPaymentId)
+                .Where(p => p.State != PayoutState.Cancelled)
+                .ToListAsync();
+                
+            decimal totalPayout = 0;
+            if (payoutsRaw != null && payoutsRaw.Any())
+            {
+                totalPayout = payoutsRaw.Sum(p => p.OriginalAmount);
+            }
+            
+            // Use Limit directly from PullPaymentData
+            var remaining = pullPayment.Limit - totalPayout;
             
             return remaining > 0;
         }

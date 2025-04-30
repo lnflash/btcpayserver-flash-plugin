@@ -5,6 +5,7 @@ using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.Flash.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace BTCPayServer.Plugins.Flash
 {
@@ -44,6 +45,9 @@ namespace BTCPayServer.Plugins.Flash
             
             // Register card services
             services.AddSingleton<FlashCardRegistrationService>();
+            
+            // Register plugin migration runner for database setup
+            services.AddHostedService<PluginMigrationRunner>();
             
             base.Execute(services);
         }

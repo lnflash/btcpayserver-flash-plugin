@@ -8,6 +8,8 @@ using BTCPayServer.Plugins.Flash.Services;
 using BTCPayServer.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
+using System.Reactive.Disposables;
 
 namespace BTCPayServer.Plugins.Flash.HostedServices
 {
@@ -46,10 +48,10 @@ namespace BTCPayServer.Plugins.Flash.HostedServices
         public Task StartAsync(CancellationToken cancellationToken)
         {
             // Subscribe to invoice payment events
-            _subscriptions.Add(_eventAggregator.Subscribe<InvoiceEvent>(HandleInvoiceEvent));
+            _subscriptions.Add(_eventAggregator.Subscribe<InvoiceEvent>((sub, evt) => _ = HandleInvoiceEvent(evt)));
             
             // Subscribe to card tap events
-            _subscriptions.Add(_eventAggregator.Subscribe<CardTapEvent>(HandleCardTapEvent));
+            _subscriptions.Add(_eventAggregator.Subscribe<CardTapEvent>((sub, evt) => _ = HandleCardTapEvent(evt)));
             
             return Task.CompletedTask;
         }
@@ -57,7 +59,23 @@ namespace BTCPayServer.Plugins.Flash.HostedServices
         private async Task HandleInvoiceEvent(InvoiceEvent evt)
         {
             // If the invoice is associated with a card top-up, update the transaction status
-            if (evt.Invoice.Metadata.TryGetValue("flashCard", out var flashCardId))
+            string? flashCardId = null;
+            
+            // Try to access metadata as JObject
+            if (evt.Invoice.Metadata != null)
+            {
+                // Try to access as dictionary or JObject
+                try
+                {
+                    var metadataObj = JObject.FromObject(evt.Invoice.Metadata);
+                    flashCardId = metadataObj["flashCard"]?.ToString();
+                }
+                catch
+                {
+                    // Failed to convert metadata to JObject
+                }
+            }
+            if (flashCardId != null)
             {
                 if (evt.Name == InvoiceEvent.Expired)
                 {

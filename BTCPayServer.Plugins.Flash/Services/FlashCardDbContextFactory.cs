@@ -5,6 +5,8 @@ using BTCPayServer.Plugins.Flash.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Options;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure;
+using System;
 
 namespace BTCPayServer.Plugins.Flash.Services
 {
@@ -30,10 +32,10 @@ namespace BTCPayServer.Plugins.Flash.Services
         {
         }
         
-        public override FlashCardDbContext CreateContext()
+        public override FlashCardDbContext CreateContext(Action<NpgsqlDbContextOptionsBuilder>? npgsqlOptionsAction = null)
         {
             var builder = new DbContextOptionsBuilder<FlashCardDbContext>();
-            ConfigureBuilder(builder);
+            ConfigureBuilder(builder, npgsqlOptionsAction);
             return new FlashCardDbContext(builder.Options);
         }
     }
