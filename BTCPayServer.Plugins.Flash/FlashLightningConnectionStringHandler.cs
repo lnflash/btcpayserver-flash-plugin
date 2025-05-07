@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.Logging;
 using Network = NBitcoin.Network;
@@ -60,23 +61,27 @@ namespace BTCPayServer.Plugins.Flash
                 return null;
             }
 
-            if (!kv.TryGetValue("api-key", out var apiKey))
+            string authToken;
+            if (!kv.TryGetValue("auth-token", out authToken))
             {
-                error = "The key 'api-key' is not found";
+                error = "The key 'auth-token' is not found";
                 return null;
+            }
+
+            // Make sure the token starts with Bearer
+            if (!authToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                authToken = $"Bearer {authToken}";
             }
 
             error = null;
 
             var client = _httpClientFactory.CreateClient();
-
-            client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
-            client.DefaultRequestHeaders.Add("Authorization", "Bearer " + apiKey);
-
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authToken.Replace("Bearer ", "", StringComparison.OrdinalIgnoreCase));
             client.BaseAddress = uri;
 
             kv.TryGetValue("wallet-id", out var walletId);
-            var fclient = new FlashLightningClient(apiKey, uri, walletId, network, client, 
+            var fclient = new FlashLightningClient(authToken, uri, walletId, network, client, 
                 _loggerFactory.CreateLogger($"{nameof(FlashLightningClient)}:{walletId}"));
             
             try
@@ -110,7 +115,7 @@ namespace BTCPayServer.Plugins.Flash
             }
             catch (Exception e)
             {
-                error = $"Invalid server or api key: {e.Message}";
+                error = $"Invalid server or authentication token: {e.Message}";
                 return null;
             }
 

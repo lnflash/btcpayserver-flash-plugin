@@ -27,7 +27,7 @@ namespace BTCPayServer.Plugins.Flash
 {
     public class FlashLightningClient : ILightningClient
     {
-        private readonly string _apiKey;
+        private readonly string _authToken;
         private readonly Uri _apiEndpoint;
         public string? WalletId { get; set; }
         public string? WalletCurrency { get; set; }
@@ -37,23 +37,29 @@ namespace BTCPayServer.Plugins.Flash
 
         public class FlashConnectionInit
         {
-            [JsonProperty("X-API-KEY")] public string ApiKey { get; set; } = string.Empty;
+            [JsonProperty("Authorization")] public string AuthToken { get; set; } = string.Empty;
         }
 
-        public FlashLightningClient(string apiKey, Uri apiEndpoint, string? walletId, Network network, HttpClient httpClient, ILogger? logger)
+        public FlashLightningClient(string authToken, Uri apiEndpoint, string? walletId, Network network, HttpClient httpClient, ILogger? logger)
         {
-            _apiKey = apiKey;
+            _authToken = authToken;
             _apiEndpoint = apiEndpoint;
             WalletId = walletId;
             _network = network;
             Logger = logger;
+            
+            // Make sure the authorization token is in the correct format
+            if (!_authToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                _authToken = $"Bearer {_authToken}";
+            }
             
             // Configure GraphQL client
             _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {
                 EndPoint = _apiEndpoint,
                 WebSocketEndPoint = new Uri("wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery),
                 WebSocketProtocol = WebSocketProtocols.GRAPHQL_TRANSPORT_WS,
-                ConfigureWebSocketConnectionInitPayload = options => new FlashConnectionInit() {ApiKey = apiKey},
+                ConfigureWebSocketConnectionInitPayload = options => new FlashConnectionInit() {AuthToken = _authToken},
                 ConfigureWebsocketOptions = _ => { }
             }, new NewtonsoftJsonSerializer(settings =>
             {
@@ -67,7 +73,7 @@ namespace BTCPayServer.Plugins.Flash
 
         public override string ToString()
         {
-            return $"type=flash;server={_apiEndpoint};api-key={_apiKey}{(WalletId is null? "":$";wallet-id={WalletId}")}";
+            return $"type=flash;server={_apiEndpoint};auth-token={_authToken}{(WalletId is null? "":$";wallet-id={WalletId}")}";
         }
 
         public async Task<(Network Network, string DefaultWalletId, string DefaultWalletCurrency)> GetNetworkAndDefaultWallet(CancellationToken cancellation = default)

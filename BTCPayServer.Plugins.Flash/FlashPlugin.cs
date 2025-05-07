@@ -4,6 +4,7 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.Flash.Services;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,12 @@ namespace BTCPayServer.Plugins.Flash
             // Add UI extensions for header navigation
             services.AddUIExtension("header-nav", $"{ViewsDirectory}/Shared/Flash/NavExtension.cshtml");
             
+            // Add embedded resources for documentation
+            services.Configure<MvcOptions>(opts =>
+            {
+                opts.EnableEndpointRouting = false;
+            });
+            
             // Register services for database access
             services.AddSingleton<FlashCardDbContextFactory>();
             services.AddDbContext<Data.FlashCardDbContext>((provider, o) =>
@@ -45,6 +52,9 @@ namespace BTCPayServer.Plugins.Flash
             
             // Register card services
             services.AddSingleton<FlashCardRegistrationService>();
+            
+            // Register connection testing service
+            services.AddSingleton<FlashConnectionTestService>();
             
             // Register plugin migration runner for database setup
             services.AddHostedService<PluginMigrationRunner>();

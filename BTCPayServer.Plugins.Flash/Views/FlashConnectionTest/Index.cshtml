@@ -1,0 +1,124 @@
+@model BTCPayServer.Plugins.Flash.Controllers.UIFlashConnectionTestController.ConnectionTestViewModel
+@{
+    ViewData["Title"] = "Test Flash API Connection";
+}
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h2 class="mb-0">Test Flash GraphQL API Connection</h2>
+    </div>
+    <div class="card-body">
+        <div class="mb-4">
+            <p>
+                This tool helps you test your Flash API connection and credentials before configuring Flash as a Lightning Network provider in BTCPay Server.
+                <a href="https://docs.getflash.io" target="_blank" rel="noopener">View Flash documentation for more information <i class="fa fa-external-link-alt"></i></a>
+            </p>
+        </div>
+        
+        <form method="post" asp-action="TestConnection">
+            <div class="form-group">
+                <label asp-for="AuthToken">Authorization Token</label>
+                <input asp-for="AuthToken" class="form-control" placeholder="Enter your Flash authorization token" />
+                <span asp-validation-for="AuthToken" class="text-danger"></span>
+                <small class="form-text text-muted">
+                    Your authorization token for the Flash GraphQL API. You can obtain this from the Flash dashboard.
+                    <br />The token can be entered with or without the "Bearer " prefix.
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="ApiEndpoint">API Endpoint</label>
+                <input asp-for="ApiEndpoint" class="form-control" placeholder="https://api.flashapp.me/graphql" />
+                <span asp-validation-for="ApiEndpoint" class="text-danger"></span>
+                <small class="form-text text-muted">The Flash GraphQL API endpoint (defaults to https://api.flashapp.me/graphql)</small>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="WalletId">Wallet ID (Optional)</label>
+                <input asp-for="WalletId" class="form-control" placeholder="Optional specific wallet ID to test" />
+                <span asp-validation-for="WalletId" class="text-danger"></span>
+                <small class="form-text text-muted">If left empty, the default wallet will be used</small>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Test Connection</button>
+        </form>
+    </div>
+</div>
+
+@if (Model?.TestResult != null)
+{
+    <div class="card mb-4 @(Model.TestResult.Success ? "border-success" : "border-danger")">
+        <div class="card-header @(Model.TestResult.Success ? "bg-success text-white" : "bg-danger text-white")">
+            <h3 class="mb-0">Connection Test Result: @(Model.TestResult.Success ? "Success" : "Failed")</h3>
+        </div>
+        <div class="card-body">
+            <p><strong>Message:</strong> @Model.TestResult.Message</p>
+            
+            @if (Model.TestResult.Success)
+            {
+                <div class="alert alert-info">
+                    <h4>Connection Details</h4>
+                    <p><strong>Network:</strong> @Model.TestResult.Network</p>
+                    <p><strong>Default Wallet ID:</strong> @Model.TestResult.DefaultWalletId</p>
+                    <p><strong>Default Wallet Currency:</strong> @Model.TestResult.DefaultWalletCurrency</p>
+                    <p><strong>Balance:</strong> @Model.TestResult.Balance</p>
+                </div>
+                
+                <h4>Connection String Format for BTCPay Server</h4>
+                <div class="alert alert-success">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <code id="connectionString">type=flash;server=@Model.ApiEndpoint;auth-token=@(Model.AuthToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? Model.AuthToken : $"Bearer {Model.AuthToken}")@(string.IsNullOrEmpty(Model.WalletId) ? "" : $";wallet-id={Model.WalletId}")</code>
+                        <button class="btn btn-sm btn-primary ml-2" onclick="copyToClipboard('connectionString')">
+                            <i class="fa fa-copy"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <p class="text-muted">Copy this connection string to set up Flash as your Lightning Network provider in BTCPay Server.</p>
+            }
+        </div>
+    </div>
+    
+    @if (Model.TestResult.Success)
+    {
+        <div class="alert alert-warning">
+            <h4>Important Security Information</h4>
+            <p>
+                Your authorization token has been validated and can be used to connect to the Flash API.
+                This token provides access to your Lightning wallet and should be kept secure.
+            </p>
+            <p>
+                When setting up the connection in BTCPay Server:
+            </p>
+            <ul>
+                <li>Store the authorization token in a secure location</li>
+                <li>Do not share the connection string with unauthorized parties</li>
+                <li>Consider using environment variables for production deployments</li>
+                <li>Tokens may expire - check Flash documentation for token renewal procedures</li>
+            </ul>
+            <p>For more information on Flash API tokens and security best practices, please visit the <a href="https://docs.getflash.io" target="_blank" rel="noopener">Flash documentation <i class="fa fa-external-link-alt"></i></a>.</p>
+        </div>
+    }
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        function copyToClipboard(elementId) {
+            var element = document.getElementById(elementId);
+            var range = document.createRange();
+            range.selectNode(element);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            document.execCommand("copy");
+            window.getSelection().removeAllRanges();
+            
+            // Show feedback
+            var button = event.target.closest('button');
+            var originalText = button.innerHTML;
+            button.innerHTML = '<i class="fa fa-check"></i> Copied!';
+            setTimeout(function() {
+                button.innerHTML = originalText;
+            }, 2000);
+        }
+    </script>
+}
