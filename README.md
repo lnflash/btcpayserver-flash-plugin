@@ -1,79 +1,75 @@
-# BTCPay Server Flash Plugin
+# Flash Lightning Plugin for BTCPay Server
 
-Integrate your Flash Lightning wallet with BTCPay Server.
+This plugin allows BTCPay Server users to connect with their Flash Lightning wallet to process Lightning Network payments.
 
 ## Features
 
-- Connect your BTCPay Server to your Flash Lightning wallet
-- Create and pay Lightning invoices through Flash
-- Secure token-based authentication
+- Connect your Flash Lightning wallet to BTCPay Server
+- Create and pay Lightning invoices using your Flash wallet
+- Access your Flash wallet balance and transaction history
+- Secure token-based authentication with the Flash API
+
+## Requirements
+
+- BTCPay Server 2.0.0 or later
+- A Flash Lightning wallet and valid bearer token
 
 ## Installation
 
+### From the Plugin Manager
+
+1. Go to your BTCPay Server admin interface
+2. Select "Plugins" from the left sidebar
+3. Click "Upload plugin" and select the `.btcpay` package file
+4. The plugin will be installed and become available in the list of installed plugins
+
 ### From Source
 
-1. Clone the repository
-2. Build the plugin:
-   ```bash
-   dotnet build
-   ```
-3. Copy the built plugin to your BTCPay Server plugins directory
-
-### From Release
-
-1. Download the latest `.btcpay` plugin file from the releases
-2. Install via the BTCPay Server UI (Server Settings > Plugins)
-
-## Local Development Setup
-
-To test the plugin locally with BTCPay Server using Docker:
-
-1. Clone the BTCPay Server Docker repository:
-   ```bash
-   git clone https://github.com/btcpayserver/btcpayserver-docker
-   cd btcpayserver-docker
-   ```
-
-2. Create or modify `docker-compose.override.yml` to mount your plugin directory:
-   ```yaml
-   version: "3"
-   
-   services:
-     btcpayserver:
-       volumes:
-         - "/path/to/BTCPayServer.Plugins.Flash:/app/plugins/BTCPayServer.Plugins.Flash"
-   ```
-
-3. Run BTCPay Server:
-   ```bash
-   ./btcpay-up.sh
-   ```
-
-4. Access BTCPay Server at `http://localhost:8080`
-5. Enable the Flash plugin in Server Settings > Plugins
-6. Configure the plugin with your Flash bearer token in Store Settings
+1. Clone this repository
+2. Build the plugin using the provided build script: `./build-package.sh`
+3. Upload the resulting `.btcpay` file through the BTCPay Server plugin manager
 
 ## Configuration
 
-1. Obtain a Flash bearer token from the Flash mobile app
-2. Navigate to your store settings in BTCPay Server
-3. Go to the "Flash" tab
-4. Enter your bearer token and save
+1. Go to Store Settings > Lightning > Payment Methods
+2. You should see Flash Lightning as an available option
+3. Click "Configure Flash Lightning"
+4. Enter your Flash bearer token (obtained from the Flash mobile app)
+5. Test the connection to ensure your token is valid
+6. Save your settings
 
-## Security
+## Technical Details
 
-The Flash bearer token is encrypted at rest in the BTCPay Server database. It is only used to communicate with the Flash API and is never exposed in logs or the UI.
+This plugin uses Flash's GraphQL API to interact with your Lightning wallet. All API requests are authenticated using your bearer token.
 
-## Usage
+The plugin implements the following features:
 
-Once configured, select Flash as your Lightning payment provider in your store's settings:
+- **Wallet Info**: Retrieves your wallet balance and status
+- **Invoice Creation**: Creates Lightning invoices for receiving payments
+- **Payment Processing**: Pays Lightning invoices using your Flash wallet
+- **Transaction History**: Lists past transactions from your Flash wallet
 
-1. Go to Store Settings > General > Lightning Network Settings
-2. Choose "Flash" as the Lightning Network implementation
-3. Save your settings
+## Security Considerations
 
-Your BTCPay Server will now use your Flash Lightning wallet for processing Lightning Network payments.
+- Your Flash bearer token is stored encrypted at rest
+- Each token is scoped to a specific store and not shared across stores
+- No sensitive information is logged during API operations
+
+## Development
+
+To build and test the plugin locally:
+
+1. Clone the repository
+2. Build the plugin: `dotnet build`
+3. Use Docker for testing with BTCPay Server:
+   ```
+   docker-compose -f docker-compose.btcpay.yml up
+   ```
 
 ## License
 
-MIT
+This plugin is released under the MIT License.
+
+## Support
+
+For support with this plugin, please open an issue on the GitHub repository or contact Flash support.

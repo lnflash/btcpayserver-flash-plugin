@@ -1,0 +1,18 @@
+@using BTCPayServer.Abstractions.Extensions
+
+@{
+    var storeId = Context.GetStoreData()?.Id;
+}
+
+<h4>Flash Lightning ⚡</h4>
+
+<div class="form-group">
+    <p>
+        Use <a href="https://flashapp.me" target="_blank" rel="noreferrer">Flash</a> to process Lightning Network payments.
+    </p>
+
+    <div class="alert alert-info">
+        Flash Lightning plugin is in development. 
+        Visit <a href="https://github.com/lnflash/btcpayserver-flash-plugin" target="_blank" rel="noreferrer">our GitHub repository</a> for more information.
+    </div>
+</div>

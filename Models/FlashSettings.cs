@@ -1,22 +1,16 @@
-using BTCPayServer.Abstractions.Contracts;
+#nullable enable
 using System.ComponentModel.DataAnnotations;
 
-namespace BTCPayServer.Plugins.Flash.Models;
-
-public class FlashSettings : IHasBlobId
+namespace BTCPayServer.Plugins.Flash.Models
 {
-    // Store specific settings
-    [Display(Name = "Flash Bearer Token")]
-    [Required(ErrorMessage = "A bearer token is required.")]
-    public string? BearerToken { get; set; }
-    
-    [Display(Name = "API URL")]
-    public string? ApiUrl { get; set; } = "https://api.flashapp.me/graphql";
+    public class FlashSettings
+    {
+        [Display(Name = "Flash Bearer Token")]
+        [Required(ErrorMessage = "A valid bearer token is required to connect to Flash")]
+        public string? BearerToken { get; set; }
 
-    // Implements the IHasBlobId interface
-    // This interface is required for settings persistence
-    [Required]
-    public string Id { get; set; } = "FlashSettings";
-
-    public string StoreId { get; set; } = string.Empty;
+        [Display(Name = "API URL")]
+        [Required(ErrorMessage = "API URL is required")]
+        public string? ApiUrl { get; set; } = "https://api.flashapp.me/graphql";
+    }
 }

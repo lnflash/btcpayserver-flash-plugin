@@ -1,0 +1,6 @@
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.csproj.AssemblyReference.cache
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.GeneratedMSBuildEditorConfig.editorconfig
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.AssemblyInfoInputs.cache
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.AssemblyInfo.cs
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.csproj.CoreCompileInputs.cache
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Debug/net8.0/BTCPayServer.Plugins.Flash.sourcelink.json

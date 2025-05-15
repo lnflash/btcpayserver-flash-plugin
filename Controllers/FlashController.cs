@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
@@ -6,148 +7,141 @@ using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Lightning;
+using BTCPayServer.Models;
 using BTCPayServer.Plugins.Flash.Models;
-using BTCPayServer.Plugins.Flash.Services;
+using BTCPayServer.Services.Stores;
+using GraphQL;
+using GraphQL.Client.Http;
+using GraphQL.Client.Serializer.Newtonsoft;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace BTCPayServer.Plugins.Flash.Controllers;
-
-[Route("plugins/[controller]")]
-[Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-public class FlashController : Controller
+namespace BTCPayServer.Plugins.Flash.Controllers
 {
-    private readonly ISettingsRepository _settingsRepository;
-    private readonly FlashClientProvider _flashClientProvider;
-    private readonly ILogger<FlashController> _logger;
-
-    public FlashController(
-        ISettingsRepository settingsRepository,
-        FlashClientProvider flashClientProvider,
-        ILogger<FlashController> logger)
+    [Route("plugins/flash")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public class FlashController : Controller
     {
-        _settingsRepository = settingsRepository;
-        _flashClientProvider = flashClientProvider;
-        _logger = logger;
-    }
+        private readonly StoreRepository _storeRepository;
+        private readonly ILogger<FlashController> _logger;
 
-    [HttpGet("{storeId}")]
-    public async Task<IActionResult> UpdateFlashSettings(string storeId)
-    {
-        var storeBlob = await _settingsRepository.GetSettingAsync<FlashSettings>(storeId) ?? new FlashSettings { StoreId = storeId };
-        
-        // Don't show the token in the UI
-        storeBlob.BearerToken = string.Empty;
-        
-        return View("~/Plugins/BTCPayServer.Plugins.Flash/UI/FlashSettings.cshtml", storeBlob);
-    }
+        private const string SettingsKey = "BTCPayServer.Plugins.Flash.Settings";
 
-    [HttpPost("{storeId}")]
-    public async Task<IActionResult> UpdateFlashSettings(string storeId, FlashSettings settings, string command)
-    {
-        settings.StoreId = storeId;
-
-        // If the token field is empty, it means the user hasn't changed it, so we should keep the old value
-        if (string.IsNullOrEmpty(settings.BearerToken))
+        public FlashController(
+            StoreRepository storeRepository,
+            ILogger<FlashController> logger)
         {
-            var existingSettings = await _settingsRepository.GetSettingAsync<FlashSettings>(storeId);
-            if (existingSettings != null)
-            {
-                settings.BearerToken = existingSettings.BearerToken;
-            }
+            _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        ModelState.Clear();
-        TryValidateModel(settings);
-
-        if (!ModelState.IsValid)
+        [HttpGet("settings/{storeId}")]
+        public async Task<IActionResult> Settings(string storeId)
         {
-            return View("~/Plugins/BTCPayServer.Plugins.Flash/UI/FlashSettings.cshtml", settings);
+            var store = await _storeRepository.FindStore(storeId);
+            if (store == null)
+                return NotFound();
+
+            var settings = await GetSettings(storeId);
+            return View("Settings", settings);
         }
 
-        // Test connection if requested
-        if (command == "test")
+        [HttpPost("settings/{storeId}")]
+        public async Task<IActionResult> Settings(string storeId, FlashPluginSettings model)
         {
-            var client = _flashClientProvider.GetClient(settings);
-            if (client == null)
+            var store = await _storeRepository.FindStore(storeId);
+            if (store == null)
+                return NotFound();
+
+            if (!ModelState.IsValid)
+                return View("Settings", model);
+
+            await _storeRepository.UpdateSetting(storeId, SettingsKey, model);
+            TempData.SetStatusMessageModel(new StatusMessageModel
             {
-                ModelState.AddModelError(string.Empty, "Unable to create Flash client with the provided settings.");
-                settings.BearerToken = string.Empty; // Clear for security
-                return View("~/Plugins/BTCPayServer.Plugins.Flash/UI/FlashSettings.cshtml", settings);
+                Severity = StatusMessageModel.StatusSeverity.Success,
+                Message = "Flash Lightning settings updated successfully."
+            });
+
+            return RedirectToAction(nameof(Settings), new { storeId });
+        }
+
+        [HttpGet("test-connection/{storeId}")]
+        public async Task<IActionResult> TestConnection(string storeId)
+        {
+            var store = await _storeRepository.FindStore(storeId);
+            if (store == null)
+                return NotFound();
+
+            var settings = await GetSettings(storeId);
+            if (!settings.IsConfigured)
+            {
+                return BadRequest("Flash Lightning is not configured properly.");
             }
+
+            var result = new TestConnectionResult();
 
             try
             {
-                // Test the connection by getting wallet info
-                await client.GetInfo();
-                TempData.SetStatusMessageModel(new StatusMessageModel
+                var graphQLClient = new GraphQLHttpClient(
+                    new GraphQLHttpClientOptions { EndPoint = new Uri(settings.ApiEndpoint ?? "https://api.flashapp.me/graphql") },
+                    new NewtonsoftJsonSerializer());
+
+                graphQLClient.HttpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.BearerToken);
+
+                var query = new GraphQLRequest
                 {
-                    Message = "Successfully connected to Flash!",
-                    Severity = StatusMessageModel.StatusSeverity.Success
-                });
+                    Query = @"
+                    query {
+                      wallet {
+                        balance
+                        currency
+                      }
+                    }"
+                };
+
+                var response = await graphQLClient.SendQueryAsync<WalletResponse>(query);
+
+                if (response.Errors != null && response.Errors.Length > 0)
+                {
+                    result.Success = false;
+                    result.Message = $"Error connecting to Flash API: {response.Errors[0].Message}";
+                }
+                else
+                {
+                    result.Success = true;
+                    result.Balance = response.Data.wallet.balance;
+                    result.Currency = response.Data.wallet.currency;
+                    result.Message = $"Successfully connected to Flash. Balance: {response.Data.wallet.balance} sats";
+                }
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError(string.Empty, $"Error connecting to Flash: {ex.Message}");
-                _logger.LogError(ex, "Error testing Flash connection");
-                settings.BearerToken = string.Empty; // Clear for security
-                return View("~/Plugins/BTCPayServer.Plugins.Flash/UI/FlashSettings.cshtml", settings);
+                _logger.LogError(ex, "Error testing connection to Flash API");
+                result.Success = false;
+                result.Message = $"Error connecting to Flash API: {ex.Message}";
+            }
+
+            return Json(result);
+        }
+
+        private async Task<FlashPluginSettings> GetSettings(string storeId)
+        {
+            var settings = await _storeRepository.GetSettingAsync<FlashPluginSettings>(storeId, SettingsKey);
+            return settings ?? new FlashPluginSettings();
+        }
+
+        private class WalletResponse
+        {
+            public WalletData wallet { get; set; } = new WalletData();
+
+            public class WalletData
+            {
+                public long balance { get; set; }
+                public string currency { get; set; } = string.Empty;
             }
         }
-
-        // Save settings
-        await _settingsRepository.UpdateSetting(settings, storeId);
-        
-        TempData.SetStatusMessageModel(new StatusMessageModel
-        {
-            Message = "Flash settings updated successfully!",
-            Severity = StatusMessageModel.StatusSeverity.Success
-        });
-
-        return RedirectToAction(nameof(UpdateFlashSettings), new { storeId });
-    }
-
-    // API endpoints for getting wallet info
-    [HttpGet("api/{storeId}/wallet-info")]
-    public async Task<IActionResult> GetWalletInfo(string storeId)
-    {
-        var settings = await _settingsRepository.GetSettingAsync<FlashSettings>(storeId);
-        if (settings == null || string.IsNullOrEmpty(settings.BearerToken))
-        {
-            return BadRequest(new { error = "Flash not configured for this store" });
-        }
-
-        var client = _flashClientProvider.GetClient(settings);
-        if (client == null)
-        {
-            return BadRequest(new { error = "Unable to create Flash client" });
-        }
-
-        try
-        {
-            var info = await client.GetInfo();
-            return Ok(info);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting Flash wallet info");
-            return BadRequest(new { error = $"Error getting wallet info: {ex.Message}" });
-        }
-    }
-
-    // API endpoint for creating a connection string
-    [HttpGet("{storeId}/connection-string")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings)]
-    public async Task<IActionResult> GetConnectionString(string storeId)
-    {
-        var settings = await _settingsRepository.GetSettingAsync<FlashSettings>(storeId);
-        if (settings == null || string.IsNullOrEmpty(settings.BearerToken))
-        {
-            return BadRequest(new { error = "Flash not configured for this store" });
-        }
-
-        var connectionString = $"type=flash;server={settings.ApiUrl};token={settings.BearerToken}";
-        return Ok(new { connectionString });
     }
 }

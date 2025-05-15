@@ -1,10 +1,11 @@
 {
-  "name": "btcpayserver.plugins.flash",
+  "name": "flash-lightning",
   "version": "1.0.0",
-  "description": "BTCPay Server Plugin for Flash Lightning wallet integration",
+  "description": "Integration with Flash Lightning Network wallet.",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "BTCPay Server",
+  "author": "Flash",
   "license": "MIT"
 }
