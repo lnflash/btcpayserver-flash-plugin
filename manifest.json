@@ -1,0 +1,9 @@
+{
+  "id": "BTCPayServer.Plugins.Flash",
+  "name": "Flash Lightning Plugin",
+  "version": "1.0.0",
+  "description": "Integrate your Flash Lightning wallet with BTCPayServer.",
+  "url": "https://github.com/flashapp/btcpayserver-plugin-flash",
+  "requires": ["1.12.0"],
+  "dependencies": []
+}

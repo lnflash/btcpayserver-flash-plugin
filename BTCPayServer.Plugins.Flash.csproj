@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="GraphQL.Client" Version="5.1.1" />
+    <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="5.1.1" />
+    <ProjectReference Include="..\btcpayserver\BTCPayServer.Abstractions\BTCPayServer.Abstractions.csproj" />
+    <ProjectReference Include="..\btcpayserver\BTCPayServer.Client\BTCPayServer.Client.csproj" />
+    <ProjectReference Include="..\btcpayserver\BTCPayServer.Common\BTCPayServer.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Remove="package.json" />
+    <None Include="package.json" />
+    <EmbeddedResource Include="Resources\**" />
+  </ItemGroup>
+</Project>

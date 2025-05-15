@@ -1,0 +1,35 @@
+@inject BTCPayServer.Abstractions.Services.ISettingsRepository SettingsRepository
+@using BTCPayServer.Plugins.Flash.Models
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@{
+    var storeId = Context.GetStoreData()?.Id;
+    var settings = await SettingsRepository.GetSettingAsync<FlashSettings>(storeId);
+    var configured = settings != null && !string.IsNullOrEmpty(settings.BearerToken);
+}
+
+<h4>Flash Lightning ⚡</h4>
+<p>
+    Use your Flash wallet to process Lightning Network payments.
+</p>
+
+@if (!configured)
+{
+    <a asp-controller="Flash" asp-action="UpdateFlashSettings" asp-route-storeId="@storeId" class="btn btn-primary">
+        Setup Flash Lightning
+    </a>
+}
+else
+{
+    <div class="form-group">
+        <div class="input-group">
+            <input type="text" class="form-control" id="flash-connection-string" 
+                   value="type=flash;server=@settings.ApiUrl;token=***" readonly />
+            <div class="input-group-append">
+                <a asp-controller="Flash" asp-action="UpdateFlashSettings" asp-route-storeId="@storeId" class="btn btn-secondary">
+                    <i class="fa fa-cog"></i> Configure
+                </a>
+            </div>
+        </div>
+    </div>
+}
