@@ -110,7 +110,7 @@ Compared to other Lightning plugins like Blink, the Flash plugin currently has t
 We welcome contributions to improve this plugin! Here's how to get started:
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/yourusername/BTCPayServer.Plugins.Flash.git`
+2. Clone your fork: `git clone https://github.com/lnflash/BTCPayServer.Plugins.Flash.git`
 3. Create a branch for your feature: `git checkout -b feature/my-new-feature`
 4. Make your changes
 5. Test thoroughly
