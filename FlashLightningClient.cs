@@ -24,6 +24,8 @@ namespace BTCPayServer.Plugins.Flash
         private readonly IGraphQLClient _graphQLClient;
         private readonly ILogger<FlashLightningClient> _logger;
         private readonly string _bearerToken;
+        private string? _cachedWalletId;
+        private string? _cachedWalletCurrency;
 
         public FlashLightningClient(
             string bearerToken,
@@ -39,6 +41,8 @@ namespace BTCPayServer.Plugins.Flash
                 httpClient = new HttpClient();
             }
 
+            // Make sure authorization header is set correctly
+            httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
 
             var options = new GraphQLHttpClientOptions
@@ -48,6 +52,64 @@ namespace BTCPayServer.Plugins.Flash
             };
 
             _graphQLClient = new GraphQLHttpClient(options, new NewtonsoftJsonSerializer(), httpClient);
+
+            // Initialize wallet ID on construction
+            InitializeWalletIdAsync().Wait();
+        }
+
+        private async Task InitializeWalletIdAsync()
+        {
+            try
+            {
+                var walletQuery = new GraphQLRequest
+                {
+                    Query = @"
+                    query {
+                      me {
+                        defaultAccount {
+                          wallets {
+                            id
+                            walletCurrency
+                          }
+                        }
+                      }
+                    }"
+                };
+
+                var walletResponse = await _graphQLClient.SendQueryAsync<WalletQueryResponse>(walletQuery);
+
+                // Prioritize USD wallet
+                var wallet = walletResponse.Data.me.defaultAccount.wallets
+                    .FirstOrDefault(w => w.walletCurrency == "USD");
+
+                if (wallet != null)
+                {
+                    _cachedWalletId = wallet.id;
+                    _cachedWalletCurrency = "USD";
+                    _logger.LogInformation($"Found wallet ID: {_cachedWalletId} for currency: {_cachedWalletCurrency}");
+                }
+                else
+                {
+                    // Only if no USD wallet is found, fall back to BTC
+                    wallet = walletResponse.Data.me.defaultAccount.wallets
+                        .FirstOrDefault(w => w.walletCurrency == "BTC");
+
+                    if (wallet != null)
+                    {
+                        _cachedWalletId = wallet.id;
+                        _cachedWalletCurrency = "BTC";
+                        _logger.LogInformation($"Found wallet ID: {_cachedWalletId} for currency: {_cachedWalletCurrency}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No suitable wallet found. Invoice creation may fail.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to initialize wallet ID: {ex.Message}");
+            }
         }
 
         public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = default)
@@ -67,18 +129,52 @@ namespace BTCPayServer.Plugins.Flash
 
                 var response = await _graphQLClient.SendQueryAsync<WalletResponse>(query, cancellation);
 
+                // Get current block height
+                int currentBlockHeight = await GetCurrentBlockHeight();
+
                 return new LightningNodeInformation
                 {
                     Alias = "Flash Lightning Wallet",
                     Version = "1.0",
-                    BlockHeight = 0,
-                    // Other properties with default values or values from the response
+                    BlockHeight = currentBlockHeight,
+                    // Only set properties that exist in LightningNodeInformation
+                    PeersCount = 1,
+                    Color = "#FFA500"
                 };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Flash wallet info");
                 throw;
+            }
+        }
+
+        private async Task<int> GetCurrentBlockHeight()
+        {
+            try
+            {
+                using var httpClient = new HttpClient();
+                // First try to get the current block height from mempool.space API
+                var response = await httpClient.GetStringAsync("https://mempool.space/api/blocks/tip/height");
+                if (int.TryParse(response, out int height))
+                {
+                    return height;
+                }
+
+                // If the primary API fails, try an alternative
+                response = await httpClient.GetStringAsync("https://blockchain.info/q/getblockcount");
+                if (int.TryParse(response, out height))
+                {
+                    return height;
+                }
+
+                // If both APIs fail, return a current value (as of May 2024)
+                return 842000;
+            }
+            catch
+            {
+                // If API calls fail, return a current value (as of May 2024)
+                return 842000;
             }
         }
 
@@ -100,48 +196,113 @@ namespace BTCPayServer.Plugins.Flash
                 }
                 string memo = createParams.Description ?? "BTCPay Server Payment";
 
-                var mutation = new GraphQLRequest
+                _logger.LogInformation($"Creating invoice for {amountSats} sats with memo: '{memo}'");
+
+                // If we don't have a cached wallet ID, try to get one now
+                if (string.IsNullOrEmpty(_cachedWalletId))
                 {
-                    Query = @"
-                    mutation CreateInvoice($input: LnInvoiceCreateInput!) {
-                      lnInvoiceCreate(input: $input) {
-                        invoice
-                        paymentRequest
-                        paymentHash
-                        paymentSecret
-                        satAmount
-                        expiresAt
-                      }
-                    }",
-                    Variables = new
+                    await InitializeWalletIdAsync();
+
+                    // If we still don't have a wallet ID, we need to fail
+                    if (string.IsNullOrEmpty(_cachedWalletId))
                     {
-                        input = new
-                        {
-                            amount = amountSats,
-                            memo = memo
-                        }
+                        throw new Exception("No valid wallet ID found. Please check your Flash account setup.");
                     }
-                };
-
-                var response = await _graphQLClient.SendMutationAsync<CreateInvoiceResponse>(mutation, cancellation);
-
-                if (response.Errors != null && response.Errors.Length > 0)
-                {
-                    string errorMessage = string.Join(", ", response.Errors.Select(e => e.Message));
-                    throw new Exception($"Failed to create invoice: {errorMessage}");
                 }
 
-                var invoice = response.Data.lnInvoiceCreate;
+                // Different mutations depending on wallet currency
+                string query;
+                Dictionary<string, object> variables = new Dictionary<string, object>();
 
-                return new LightningInvoice
+                if (_cachedWalletCurrency == "USD")
                 {
-                    Id = invoice.paymentHash,
-                    BOLT11 = invoice.paymentRequest,
-                    Amount = new LightMoney(invoice.satAmount, LightMoneyUnit.Satoshi),
-                    ExpiresAt = invoice.expiresAt,
-                    Status = LightningInvoiceStatus.Unpaid,
-                    AmountReceived = LightMoney.Zero,
+                    // Try a simpler approach with FractionalCentAmount
+                    // For USD cents, we need to convert from satoshis (1 BTC = 100,000,000 sats, approx $65,000)
+                    // So roughly $0.00065 per sat, or 0.065 cents per sat
+                    double usdCentAmount = amountSats * 0.065;
+
+                    _logger.LogInformation($"Converting {amountSats} sats to {usdCentAmount} USD cents for API call");
+
+                    // Use the USD-specific mutation for USD wallets
+                    query = @"
+                    mutation CreateUsdInvoice($amount: FractionalCentAmount!, $memo: Memo, $walletId: WalletId!) {
+                      lnUsdInvoiceCreate(input: {amount: $amount, memo: $memo, walletId: $walletId}) {
+                        invoice {
+                          paymentHash
+                          paymentRequest
+                          paymentSecret
+                          satoshis
+                        }
+                        errors {
+                          message
+                        }
+                      }
+                    }";
+
+                    variables.Add("amount", usdCentAmount);
+                    variables.Add("memo", memo);
+                    variables.Add("walletId", _cachedWalletId);
+                }
+                else if (_cachedWalletCurrency == "BTC")
+                {
+                    throw new Exception("Flash does not support BTC wallets for lightning invoices.");
+                }
+                else
+                {
+                    throw new Exception($"Unsupported wallet currency: {_cachedWalletCurrency}");
+                }
+
+                var mutation = new GraphQLRequest
+                {
+                    Query = query,
+                    Variables = variables
                 };
+
+                _logger.LogInformation($"Sending GraphQL mutation: {query}");
+                _logger.LogInformation($"With variables: {JsonConvert.SerializeObject(variables)}");
+
+                try
+                {
+                    var response = await _graphQLClient.SendMutationAsync<UsdInvoiceResponse>(mutation, cancellation);
+
+                    if (response.Errors != null && response.Errors.Length > 0)
+                    {
+                        string errorMessage = string.Join(", ", response.Errors.Select(e => e.Message));
+                        _logger.LogError($"GraphQL error: {errorMessage}");
+                        throw new Exception($"Failed to create invoice: {errorMessage}");
+                    }
+
+                    if (response.Data?.lnUsdInvoiceCreate?.errors != null && response.Data.lnUsdInvoiceCreate.errors.Any())
+                    {
+                        string errorMessage = string.Join(", ", response.Data.lnUsdInvoiceCreate.errors.Select(e => e.message));
+                        _logger.LogError($"Business logic error: {errorMessage}");
+                        throw new Exception($"Failed to create invoice: {errorMessage}");
+                    }
+
+                    var invoice = response.Data?.lnUsdInvoiceCreate?.invoice;
+                    if (invoice == null)
+                    {
+                        _logger.LogError("Response contained no invoice data");
+                        throw new Exception("Failed to create invoice: No invoice data returned");
+                    }
+
+                    _logger.LogInformation($"Successfully created invoice with hash: {invoice.paymentHash}");
+
+                    return new LightningInvoice
+                    {
+                        Id = invoice.paymentHash,
+                        BOLT11 = invoice.paymentRequest,
+                        Amount = new LightMoney(invoice.satoshis ?? amountSats, LightMoneyUnit.Satoshi),
+                        ExpiresAt = DateTime.UtcNow.AddHours(24), // Default expiry
+                        Status = LightningInvoiceStatus.Unpaid,
+                        AmountReceived = LightMoney.Zero,
+                    };
+                }
+                catch (GraphQL.Client.Http.GraphQLHttpRequestException gqlEx)
+                {
+                    _logger.LogError(gqlEx, "GraphQL HTTP request failed");
+                    throw new Exception($"API request failed: {gqlEx.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -359,18 +520,50 @@ namespace BTCPayServer.Plugins.Flash
             }
         }
 
-        private class CreateInvoiceResponse
+        private class SchemaResponse
         {
-            public InvoiceData lnInvoiceCreate { get; set; } = null!;
+            public SchemaTypeData __type { get; set; } = null!;
+
+            public class SchemaTypeData
+            {
+                public string name { get; set; } = null!;
+                public List<SchemaFieldData> fields { get; set; } = null!;
+            }
+
+            public class SchemaFieldData
+            {
+                public string name { get; set; } = null!;
+                public SchemaTypeInfo type { get; set; } = null!;
+            }
+
+            public class SchemaTypeInfo
+            {
+                public string name { get; set; } = null!;
+                public string kind { get; set; } = null!;
+            }
+        }
+
+        private class UsdInvoiceResponse
+        {
+            public InvoiceCreateData lnUsdInvoiceCreate { get; set; } = null!;
+
+            public class InvoiceCreateData
+            {
+                public List<ErrorData>? errors { get; set; }
+                public InvoiceData? invoice { get; set; }
+            }
+
+            public class ErrorData
+            {
+                public string message { get; set; } = null!;
+            }
 
             public class InvoiceData
             {
-                public string invoice { get; set; } = null!;
-                public string paymentRequest { get; set; } = null!;
                 public string paymentHash { get; set; } = null!;
+                public string paymentRequest { get; set; } = null!;
                 public string paymentSecret { get; set; } = null!;
-                public long satAmount { get; set; }
-                public DateTime expiresAt { get; set; }
+                public long? satoshis { get; set; }
             }
         }
 
@@ -397,6 +590,27 @@ namespace BTCPayServer.Plugins.Flash
                 public string direction { get; set; } = null!;
                 public DateTime createdAt { get; set; }
                 public string status { get; set; } = null!;
+            }
+        }
+
+        private class WalletQueryResponse
+        {
+            public MeData me { get; set; } = null!;
+
+            public class MeData
+            {
+                public AccountData defaultAccount { get; set; } = null!;
+            }
+
+            public class AccountData
+            {
+                public List<WalletData> wallets { get; set; } = null!;
+            }
+
+            public class WalletData
+            {
+                public string id { get; set; } = null!;
+                public string walletCurrency { get; set; } = null!;
             }
         }
     }
