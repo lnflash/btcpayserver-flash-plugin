@@ -166,4 +166,4 @@ For support with this plugin:
 - Open an issue on the GitHub repository
 - Join the BTCPay Server community on Mattermost
 - Contact Flash support for account-specific issues
-- For API-specific questions: support@flashapp.me
+- For API-specific questions [Join our Discord](https://discord.gg/8jCg8eCRhF) or email us at development@getflash.io
