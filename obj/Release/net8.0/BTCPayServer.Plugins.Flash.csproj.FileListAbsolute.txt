@@ -36,3 +36,10 @@
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/_ViewImports.cshtml
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/BTCPayServer.Plugins.Flash.RazorAssemblyInfo.cache
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/BTCPayServer.Plugins.Flash.RazorAssemblyInfo.cs
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/BTCPayServer.Lightning.Common.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/LNURL.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/System.Net.Http.Formatting.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.Logging.Abstractions.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/NBitcoin.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Newtonsoft.Json.Bson.dll

@@ -5,7 +5,7 @@
   },
   "projects": {
     "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/BTCPayServer.Plugins.Flash.csproj": {
-      "version": "1.0.0",
+      "version": "1.3.0",
       "restore": {
         "projectUniqueName": "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/BTCPayServer.Plugins.Flash.csproj",
         "projectName": "BTCPayServer.Plugins.Flash",
@@ -55,6 +55,10 @@
             "GraphQL.Client.Serializer.Newtonsoft": {
               "target": "Package",
               "version": "[6.0.2, )"
+            },
+            "LNURL": {
+              "target": "Package",
+              "version": "[0.0.36, )"
             }
           },
           "imports": [

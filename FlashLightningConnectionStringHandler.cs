@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using System.Threading;
 
 namespace BTCPayServer.Plugins.Flash
 {
@@ -65,6 +66,36 @@ namespace BTCPayServer.Plugins.Flash
                 flashConnectionString.BearerToken,
                 new Uri(flashConnectionString.Endpoint),
                 _loggerFactory.CreateLogger<FlashLightningClient>());
+        }
+
+        public async Task<object> GetLightningClient(string connectionString, BTCPayNetwork network, CancellationToken cancellation)
+        {
+            if (connectionString == null)
+                throw new ArgumentNullException(nameof(connectionString));
+
+            if (!CanHandle(connectionString))
+                throw new ArgumentException("Invalid connection string", nameof(connectionString));
+
+            try
+            {
+                var flashConnectionString = Parse(connectionString);
+                var client = new FlashLightningClient(
+                    flashConnectionString.BearerToken,
+                    new Uri(flashConnectionString.Endpoint),
+                    _loggerFactory.CreateLogger<FlashLightningClient>());
+
+                // Verify the connection works by calling GetInfo
+                await client.GetInfo(cancellation);
+
+                // Return the client instance directly
+                return client;
+            }
+            catch (Exception ex)
+            {
+                _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                    .LogError(ex, "Error creating Flash Lightning client");
+                throw;
+            }
         }
 
         public Task<object> GetLightningNodeDashboardInfo(string connectionString, BTCPayNetwork network)

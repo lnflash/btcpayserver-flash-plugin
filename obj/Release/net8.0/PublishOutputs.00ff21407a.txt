@@ -2,10 +2,17 @@
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/BTCPayServer.Plugins.Flash.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/BTCPayServer.Plugins.Flash.deps.json
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/BTCPayServer.Plugins.Flash.pdb
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/BTCPayServer.Lightning.Common.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/GraphQL.Client.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/GraphQL.Client.Abstractions.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/GraphQL.Client.Abstractions.Websocket.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/GraphQL.Client.Serializer.Newtonsoft.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/GraphQL.Primitives.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/LNURL.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/System.Net.Http.Formatting.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/Microsoft.Extensions.DependencyInjection.Abstractions.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/Microsoft.Extensions.Logging.Abstractions.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/NBitcoin.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/Newtonsoft.Json.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/Newtonsoft.Json.Bson.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/publish/System.Reactive.dll

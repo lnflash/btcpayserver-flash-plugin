@@ -1,0 +1,41 @@
+@using BTCPayServer.Abstractions.Extensions
+
+<div class="accordion-body p-0">
+    <div class="list-group list-group-flush">
+        <div class="list-group-item">
+            <h5 class="mb-3">
+                <span>Flash Lightning</span>
+                <img src="~/img/logo-white.svg" width="20" height="20" class="d-none d-dark-inline-block"
+                    alt="Flash Lightning logo" />
+                <img src="~/img/logo.svg" width="20" height="20" class="d-inline-block d-dark-none"
+                    alt="Flash Lightning logo" />
+            </h5>
+
+            <p>
+                Connect to the Flash Lightning Network wallet by entering your Flash bearer token.
+                <a href="https://flashapp.me" target="_blank" rel="noreferrer noopener" class="text-info">
+                    <span class="fa fa-external-link-square-alt"></span> Learn more about Flash
+                </a>
+            </p>
+
+            <div class="form-group">
+                <p>To configure Flash Lightning:</p>
+                <ol class="list-group py-3">
+                    <li class="list-group-item">
+                        <span>Obtain your Flash API bearer token from the Flash mobile app</span>
+                    </li>
+                    <li class="list-group-item">
+                        <a asp-controller="Flash" asp-action="Settings" asp-route-storeId="@Context.GetStoreData().Id"
+                            class="btn btn-primary btn-sm d-inline-block mt-2">
+                            Configure Flash Lightning
+                        </a>
+                    </li>
+                </ol>
+            </div>
+
+            <p class="text-muted mb-0">
+                <span>Use this payment method to process Lightning Network payments with your Flash wallet.</span>
+            </p>
+        </div>
+    </div>
+</div>

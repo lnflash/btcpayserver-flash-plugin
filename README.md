@@ -9,6 +9,9 @@ This plugin enables BTCPay Server users to connect with their Flash Lightning wa
 - Process USD-denominated Lightning payments 
 - Secure token-based authentication with the Flash API
 - Simple setup with automatic wallet detection
+- Support for LNURL and Lightning Address payments
+- Support for Pull Payments with LNURL-withdraw
+- Advanced payment tracking system for asynchronous payment flows
 
 ## Requirements
 
@@ -32,6 +35,25 @@ This plugin enables BTCPay Server users to connect with their Flash Lightning wa
 3. Build the plugin using the provided build script: `./build-package.sh`
 4. Upload the resulting `.btcpay` file through the BTCPay Server plugin manager
 
+### Installing from BTCPay Server UI
+
+1. Download the latest `.btcpay` package from the releases
+2. In your BTCPay Server, go to **Server Settings > Plugins**
+3. Click **Choose File** and select the downloaded `.btcpay` package
+4. Click **Upload** to install the plugin
+5. Restart your BTCPay Server when prompted
+
+### Manual Installation
+
+If the UI installation doesn't work, you can install the plugin manually:
+
+1. Download the latest release files
+2. Extract the contents into the plugins directory of your BTCPay Server installation:
+   ```
+   /root/.btcpayserver/plugins/BTCPayServer.Plugins.Flash/
+   ```
+3. Restart your BTCPay Server
+
 ## Configuration
 
 1. Go to Store Settings > Lightning > Payment Methods
@@ -45,6 +67,25 @@ This plugin enables BTCPay Server users to connect with their Flash Lightning wa
 6. Test the connection to ensure your token is valid
 7. Save your settings
 
+## Pull Payment Support
+
+The Flash plugin supports BTCPay Server's Pull Payment functionality, allowing merchants to create pull payments that can be claimed via any Lightning wallet supporting LNURL-withdraw.
+
+### Features
+- LNURL-withdraw support for seamless claiming of pull payments
+- Direct invoice creation and payment through the Flash GraphQL API
+- Full tracking of pull payment claims and payouts within BTCPayServer
+- Support for both LNURL destinations and standard BOLT11 invoices
+- Robust payment tracking system for asynchronous payment flows
+
+### Usage
+1. Create a pull payment in BTCPayServer and enable the Lightning payment method
+2. Share the pull payment link with recipients
+3. Recipients can:
+   - Scan the LNURL-withdraw QR code with their Lightning wallet
+   - Paste a BOLT11 invoice directly into the claim form
+4. The claim will be processed automatically
+
 ## Technical Details
 
 This plugin uses Flash's GraphQL API to interact with your Lightning wallet. All API requests are authenticated using your bearer token.
@@ -55,55 +96,63 @@ The plugin implements the following features:
 - **Invoice Creation**: Creates USD-denominated Lightning invoices for receiving payments
 - **Payment Processing**: Processes payments using Flash's LN infrastructure
 - **Amount Conversion**: Handles the conversion between satoshis and USD cents
+- **Invoice Type Detection**: Automatically detects and handles different types of invoices (amount/no-amount)
+- **USD Wallet Support**: Full support for Lightning payments from USD wallets
+- **Case-Insensitive LNURL Processing**: Handles LNURL payments regardless of case in the URL
+- **Payment Status Tracking**: Sophisticated tracking system for asynchronous payment flows
+- **Detailed Error Diagnostics**: Provides comprehensive error information for troubleshooting
 
 ### Implementation Notes
 
 - The plugin uses GraphQL for API communication
 - USD invoices are created using the `lnUsdInvoiceCreate` mutation
+- Payments are processed using the appropriate mutation based on invoice type:
+  - `lnInvoicePaymentSend` for invoices with amounts
+  - `lnNoAmountInvoicePaymentSend` for no-amount invoices from BTC wallets
+  - `lnNoAmountUsdInvoicePaymentSend` for no-amount invoices from USD wallets
+- LNURL handling uses case-insensitive comparison by converting to lowercase
 - The wallet caching mechanism ensures optimal API usage
-- Error handling provides detailed information for troubleshooting
-
-## Future Enhancements
-
-The following features are on the roadmap to bring this plugin to feature parity with other Lightning plugins like Blink:
-
-### High Priority
-
-- **Real-time Payment Notifications**: Implement webhook support to receive instant payment notifications
-- **Invoice Status Updates**: Support for real-time invoice status changes via WebSockets
-- **BTC Wallet Support**: Add compatibility with BTC-denominated wallets in addition to USD
-- **Payment Refunds**: Support for refunding/returning payments when needed
-
-### Medium Priority
-
-- **Enhanced Transaction History**: Improved display and filtering of transaction history
-- **Multi-wallet Support**: Allow configuration of multiple Flash wallets for different purposes
-- **Advanced Payment Features**: Support for LNURL-pay, LNURL-withdraw, and Keysend payments
-- **On-chain Payments**: Basic support for on-chain transactions where supported by Flash
-
-### Low Priority
-
-- **Customizable Amount Conversion**: Allow merchants to set custom exchange rates and conversion settings
-- **Extended Metadata**: Support for additional invoice metadata and tags
-- **Advanced Reporting**: Detailed payment analytics and reporting features
-- **Admin UI Improvements**: Enhanced settings interface with more configuration options
-
-## Security Considerations
-
-- Your Flash bearer token is stored encrypted at rest
-- Each token is scoped to a specific store and not shared across stores
-- No sensitive information is logged during API operations
-- All API communication uses HTTPS
+- Enhanced error handling provides detailed diagnostic information for troubleshooting
+- Implementation follows Flash mobile app patterns for optimal compatibility
+- Multi-hash tracking system to handle various hash formats used by BTCPay Server
 
 ## Known Limitations
 
 Compared to other Lightning plugins like Blink, the Flash plugin currently has the following limitations:
 
-- **USD Only**: Currently only supports USD-denominated wallets, not BTC wallets
 - **No WebSockets**: Does not support real-time updates through WebSockets
 - **Limited Reporting**: Basic transaction reporting capabilities
 - **No Webhook Support**: Cannot send notifications to external systems
 - **Fixed Conversion Rate**: Uses a fixed conversion rate for BTC/USD rather than dynamic rates
+- **Payment Verification**: The plugin can't always definitively verify that a payment was completed
+- **Status Persistence**: Payment status is not stored persistently between restarts
+
+## Important Usage Notes
+
+When using the Flash plugin:
+
+1. **For Receiving Payments**: Lightning Network invoices with or without amounts are supported.
+2. **For Sending Payments (Payouts)**: 
+   - Supports paying to standard BOLT11 invoices
+   - Supports LNURL and Lightning Addresses with proper case-insensitive handling
+   - Automatically detects and handles different types of destinations
+3. **For Pull Payments**:
+   - Both LNURL destinations and BOLT11 invoices are supported
+   - For LNURL, payment status will show "payment has been initiated but is still in-flight"
+   - For some payments, payment completion verification may be limited
+
+## Troubleshooting
+
+Common issues and solutions:
+
+- **Connection Error**: Verify your token is valid and has not expired
+- **Invoice Creation Fails**: Ensure you have a USD wallet in your Flash account
+- **Authentication Error**: Check that your token has the necessary permissions
+- **API URL Error**: Confirm the server URL is correct (should be https://api.flashapp.me/graphql)
+- **Amount Conversion Issues**: For very small or very large amounts, the conversion may not be precise
+- **Case Sensitivity in LNURL**: The plugin now handles case insensitivity automatically, but if you encounter issues, try using all lowercase for LNURL or Lightning addresses
+- **Payment Status Issues**: If the payment status shows "in-flight" for LNURL pull payments, the payment may still have processed successfully
+- **Pull Payment LNURL Issues**: If experiencing problems with LNURL in pull payments, try using a BOLT11 invoice instead
 
 ## Contributing
 
@@ -117,44 +166,6 @@ We welcome contributions to improve this plugin! Here's how to get started:
 6. Commit your changes: `git commit -am 'Add some feature'`
 7. Push to the branch: `git push origin feature/my-new-feature`
 8. Submit a pull request
-
-### Development Environment Setup
-
-1. Clone the BTCPay Server repository
-2. Clone this plugin repository
-3. Build BTCPay Server: `dotnet build`
-4. Build the plugin: `./build-package.sh`
-5. For local testing, you can use Docker:
-   ```
-   docker-compose -f docker-compose.btcpay.yml up
-   ```
-
-### Coding Guidelines
-
-- Follow C# coding conventions
-- Use async/await pattern for asynchronous operations
-- Add meaningful comments for complex logic
-- Write unit tests for new features
-- Keep API calls efficient and minimal
-
-## Troubleshooting
-
-Common issues and solutions:
-
-- **Connection Error**: Verify your token is valid and has not expired
-- **Invoice Creation Fails**: Ensure you have a USD wallet in your Flash account
-- **Authentication Error**: Check that your token has the necessary permissions
-- **API URL Error**: Confirm the server URL is correct (should be https://api.flashapp.me/graphql)
-- **Amount Conversion Issues**: For very small or very large amounts, the conversion may not be precise
-
-## Testing the Plugin
-
-To verify that your plugin is working correctly:
-
-1. After configuration, create a test invoice for a small amount (e.g., $1)
-2. Check the logs for any errors during invoice creation
-3. Scan the invoice with a Lightning wallet to confirm it's valid
-4. Make a test payment to ensure the funds arrive in your Flash wallet
 
 ## License
 

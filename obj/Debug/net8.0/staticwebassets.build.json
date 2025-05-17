@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "0xSThZx+ElidFr+t4Fdq1/KCnLE3vB3b/UJI9hF84z4=",
+  "Source": "BTCPayServer.Plugins.Flash",
+  "BasePath": "_content/BTCPayServer.Plugins.Flash",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}

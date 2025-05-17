@@ -18,12 +18,24 @@ build_property.GenerateRazorMetadataSourceChecksumAttributes =
 build_property.MSBuildProjectDirectory = /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash
 build_property._RazorSourceGeneratorDebug = 
 
-[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/UI/FlashSettings.cshtml]
-build_metadata.AdditionalFiles.TargetPath = VUkvRmxhc2hTZXR0aW5ncy5jc2h0bWw=
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/FlashSettings.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvRmxhc2hTZXR0aW5ncy5jc2h0bWw=
 build_metadata.AdditionalFiles.CssScope = 
 
-[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/UI/_FlashSetup.cshtml]
-build_metadata.AdditionalFiles.TargetPath = VUkvX0ZsYXNoU2V0dXAuY3NodG1s
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/LNPaymentMethodSetupTab.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvTE5QYXltZW50TWV0aG9kU2V0dXBUYWIuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/Settings.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvU2V0dGluZ3MuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/SetupTab.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvU2V0dXBUYWIuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Shared/Flash/LNPaymentMethodSetupTab.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvU2hhcmVkL0ZsYXNoL0xOUGF5bWVudE1ldGhvZFNldHVwVGFiLmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 
 
 [/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/_ViewImports.cshtml]

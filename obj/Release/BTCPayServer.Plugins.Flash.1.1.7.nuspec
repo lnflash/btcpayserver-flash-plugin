@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>BTCPayServer.Plugins.Flash</id>
+    <version>1.1.7</version>
+    <authors>BTCPayServer.Plugins.Flash</authors>
+    <description>Flash integration</description>
+    <repository type="git" commit="95ae3efc7c277372e5521402bcf25e56ba0674e5" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="BTCPayServer" version="2.1.1" exclude="Runtime,Build,Native,Analyzers,BuildTransitive" />
+        <dependency id="GraphQL.Client" version="6.0.2" exclude="Build,Analyzers" />
+        <dependency id="GraphQL.Client.Serializer.Newtonsoft" version="6.0.2" exclude="Build,Analyzers" />
+        <dependency id="LNURL" version="0.0.36" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <contentFiles>
+      <files include="any/net8.0/manifest.json" buildAction="Content" />
+    </contentFiles>
+  </metadata>
+  <files>
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/BTCPayServer.Plugins.Flash.dll" target="lib/net8.0/BTCPayServer.Plugins.Flash.dll" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/manifest.json" target="content/manifest.json" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/manifest.json" target="contentFiles/any/net8.0/manifest.json" />
+  </files>
+</package>
