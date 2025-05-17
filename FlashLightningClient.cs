@@ -252,26 +252,56 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
+                // Ensure wallet ID is cached
+                if (string.IsNullOrEmpty(_cachedWalletId))
+                {
+                    await InitializeWalletIdAsync();
+                    if (string.IsNullOrEmpty(_cachedWalletId))
+                    {
+                        throw new InvalidOperationException("Could not determine wallet ID for invoice creation");
+                    }
+                }
+
+                // Enforce minimum invoice amount for Boltcard compatibility
                 long amountSats = 0;
                 if (createParams.Amount != null)
                 {
                     amountSats = (long)createParams.Amount.MilliSatoshi / 1000;
                 }
+
+                if (amountSats < 100) // 100 sats minimum for compatibility
+                {
+                    _logger.LogWarning($"[PAYMENT DEBUG] Requested amount {amountSats} sats is below minimum threshold of 100 sats. Adjusting to minimum.");
+                    amountSats = 100;
+                }
+
                 string memo = createParams.Description ?? "BTCPay Server Payment";
 
                 _logger.LogInformation($"Creating invoice for {amountSats} sats with memo: '{memo}'");
 
-                // If we don't have a cached wallet ID, try to get one now
-                if (string.IsNullOrEmpty(_cachedWalletId))
-                {
-                    await InitializeWalletIdAsync();
+                // Convert satoshis to USD cents
+                decimal amountUsdCents = await ConvertSatoshisToUsdCents(amountSats, cancellation);
 
-                    // If we still don't have a wallet ID, we need to fail
-                    if (string.IsNullOrEmpty(_cachedWalletId))
-                    {
-                        throw new Exception("No valid wallet ID found. Please check your Flash account setup.");
-                    }
-                }
+                // Ensure consistent rounding for LNURL compatibility
+                amountUsdCents = Math.Round(amountUsdCents, 5, MidpointRounding.AwayFromZero);
+
+                _logger.LogInformation($"Converting {amountSats} sats to {amountUsdCents} USD cents for invoice creation using current exchange rate");
+
+                // Use GraphQL to create an invoice through Flash
+                _logger.LogInformation("Sending GraphQL mutation: \n" +
+                    "                          mutation lnUsdInvoiceCreate($input: LnUsdInvoiceCreateInput!) {\n" +
+                    "                            lnUsdInvoiceCreate(input: $input) {\n" +
+                    "                              invoice {\n" +
+                    "                                paymentHash\n" +
+                    "                                paymentRequest\n" +
+                    "                                paymentSecret\n" +
+                    "                                satoshis\n" +
+                    "                              }\n" +
+                    "                              errors {\n" +
+                    "                                message\n" +
+                    "                              }\n" +
+                    "                            }\n" +
+                    "                          }");
 
                 // Different mutations depending on wallet currency
                 string query;
@@ -281,11 +311,6 @@ namespace BTCPayServer.Plugins.Flash
                 {
                     // Try a simpler approach with FractionalCentAmount
                     // For USD cents, we need to convert from satoshis using current exchange rate
-                    decimal usdCentAmount = await ConvertSatoshisToUsdCents(amountSats, cancellation);
-
-                    _logger.LogInformation($"Converting {amountSats} sats to {usdCentAmount} USD cents for invoice creation using current exchange rate");
-
-                    // Use the USD-specific mutation for USD wallets
                     query = @"
                     mutation lnUsdInvoiceCreate($input: LnUsdInvoiceCreateInput!) {
                       lnUsdInvoiceCreate(input: $input) {
@@ -303,7 +328,7 @@ namespace BTCPayServer.Plugins.Flash
 
                     variables.Add("input", new
                     {
-                        amount = usdCentAmount,
+                        amount = amountUsdCents,
                         memo = memo,
                         walletId = _cachedWalletId
                     });
@@ -3584,17 +3609,16 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
-                // Get the current BTC/USD exchange rate
-                decimal btcUsdRate = await GetCurrentExchangeRate(cancellation);
+                // Get current BTC/USD exchange rate
+                decimal btcUsdRate = await GetBtcUsdExchangeRate(cancellation);
 
-                // Convert satoshis to BTC (1 BTC = 100,000,000 satoshis)
-                decimal btcAmount = satoshis / 100000000m;
+                // Convert with consistent precision for LNURL compatibility
+                decimal btcAmount = satoshis / 100_000_000m; // Convert sats to BTC
+                decimal usdAmount = btcAmount * btcUsdRate; // Convert to USD
+                decimal usdCents = usdAmount * 100m; // Convert to cents
 
-                // Convert BTC to USD
-                decimal usdAmount = btcAmount * btcUsdRate;
-
-                // Convert USD to cents (1 USD = 100 cents)
-                decimal usdCents = usdAmount * 100m;
+                // Use exact same precision for all calculations
+                usdCents = Math.Round(usdCents, 8, MidpointRounding.AwayFromZero);
 
                 _logger.LogInformation($"[PAYMENT DEBUG] Converted {satoshis} satoshis to {usdCents} USD cents using rate {btcUsdRate} USD/BTC");
 
@@ -3603,12 +3627,7 @@ namespace BTCPayServer.Plugins.Flash
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"[PAYMENT DEBUG] Error converting satoshis to USD cents");
-
-                // Fallback conversion using approximate rate ($60,000 per BTC)
-                decimal fallbackUsdCents = satoshis * 0.06m;
-                _logger.LogInformation($"[PAYMENT DEBUG] Using fallback conversion: {satoshis} satoshis to {fallbackUsdCents} USD cents");
-
-                return fallbackUsdCents;
+                throw;
             }
         }
 
@@ -3628,5 +3647,69 @@ namespace BTCPayServer.Plugins.Flash
 
         // Add dedicated storage for pull payment amounts
         private readonly Dictionary<string, long> _pullPaymentAmounts = new Dictionary<string, long>();
+
+        private async Task<decimal> GetBtcUsdExchangeRate(CancellationToken cancellation = default)
+        {
+            // First try to get the exchange rate from Flash API
+            try
+            {
+                var query = @"
+                query getRealTimePrice {
+                  realtimePrice {
+                    btcToCurrency(currency: ""USD"") {
+                      base
+                      currency
+                      price
+                    }
+                  }
+                }";
+
+                var response = await _graphQLClient.SendQueryAsync<JObject>(new GraphQLRequest { Query = query }, cancellation);
+
+                if (response?.Data?["realtimePrice"]?["btcToCurrency"]?["price"] != null)
+                {
+                    decimal exchangeRate = response.Data["realtimePrice"]["btcToCurrency"]["price"].Value<decimal>();
+                    return exchangeRate;
+                }
+                else if (response?.Errors?.Length > 0)
+                {
+                    string errorMessage = string.Join(", ", response.Errors.Select(e => e.Message));
+                    _logger.LogWarning($"[PAYMENT DEBUG] Error getting exchange rate from Flash API: {errorMessage}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[PAYMENT DEBUG] Error getting exchange rate from Flash API: {ex.Message}");
+            }
+
+            // If Flash API fails, try fallback options
+            _logger.LogInformation($"[PAYMENT DEBUG] Attempting to get exchange rate from fallback APIs");
+
+            // Try CoinGecko API
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    httpClient.DefaultRequestHeaders.Add("User-Agent", "BTCPayServer/Flash-Plugin");
+                    var response = await httpClient.GetStringAsync("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", cancellation);
+                    var jsonResponse = JObject.Parse(response);
+                    if (jsonResponse["bitcoin"]?["usd"] != null)
+                    {
+                        decimal rate = jsonResponse["bitcoin"]["usd"].Value<decimal>();
+                        _logger.LogInformation($"[PAYMENT DEBUG] Retrieved fallback BTC/USD exchange rate from CoinGecko: {rate}");
+                        return rate;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[PAYMENT DEBUG] Error getting exchange rate from CoinGecko: {ex.Message}");
+            }
+
+            // If all else fails, use a conservative fixed rate
+            decimal fallbackRate = 60000m; // $60,000 per BTC
+            _logger.LogWarning($"[PAYMENT DEBUG] All exchange rate services failed, using fallback fixed rate: {fallbackRate} USD/BTC");
+            return fallbackRate;
+        }
     }
 }
