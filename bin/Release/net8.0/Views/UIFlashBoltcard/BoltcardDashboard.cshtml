@@ -1,0 +1,192 @@
+@model BTCPayServer.Plugins.Flash.Controllers.BoltcardDashboardViewModel
+@{
+    ViewData["Title"] = "Flash Boltcard Dashboard";
+    Layout = "_NavLayout";
+}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2>@ViewData["Title"]</h2>
+    <a asp-action="TransactionHistory" asp-route-storeId="@Model.StoreId" class="btn btn-primary">
+        View All Transactions
+    </a>
+</div>
+
+@if (!string.IsNullOrEmpty(ViewBag.ErrorMessage))
+{
+    <div class="alert alert-danger">
+    @ViewBag.ErrorMessage
+</div>
+}
+else
+{
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Total Transactions</h5>
+                <h3 class="text-primary">@Model.Stats.TotalTransactions</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Unique Cards</h5>
+                <h3 class="text-info">@Model.Stats.UniqueCards</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Total Amount</h5>
+                <h3 class="text-success">@Model.Stats.TotalAmountSats sats</h3>
+                <small class="text-muted">≈ $@((Model.Stats.TotalAmountSats * 0.001m).ToString("F2"))</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Success Rate</h5>
+                <h3 class="text-warning">@Model.Stats.SuccessRate.ToString("F1")%</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Last 24 Hours</h5>
+                <h3 class="text-primary">@Model.Stats.Last24Hours</h3>
+                <small class="text-muted">transactions</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Average Amount</h5>
+                <h3 class="text-info">
+                    @(Model.Stats.TotalTransactions > 0 ? (Model.Stats.TotalAmountSats /
+                            Model.Stats.TotalTransactions).ToString("F0") : "0") sats
+                    </h3>
+                    <small class="text-muted">per transaction</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Recent Boltcard Transactions</h5>
+        <span class="badge bg-secondary">@Model.RecentTransactions.Count recent</span>
+    </div>
+    <div class="card-body">
+        @if (!Model.RecentTransactions.Any())
+            {
+                <div class="text-center py-4">
+                    <p class="text-muted">No Boltcard transactions found.</p>
+                    <small>Boltcard transactions will appear here when users make payments via NFC cards.</small>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Card ID</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                                <th>Invoice ID</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var transaction in Model.RecentTransactions)
+                            {
+                                <tr>
+                                    <td>
+                                        <a asp-action="CardDetails" asp-route-storeId="@Model.StoreId"
+                                            asp-route-cardId="@transaction.BoltcardId" class="text-decoration-none">
+                                            <code>@transaction.BoltcardId</code>
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <span class="fw-bold">@transaction.AmountSats sats</span>
+                                        <br>
+                                        <small class="text-muted">≈ $@((transaction.AmountSats * 0.001m).ToString("F2"))</small>
+                                    </td>
+                                    <td>
+                                        @switch (transaction.Status)
+                                        {
+                                            case "Paid":
+                                                <span class="badge bg-success">Paid</span>
+                                                break;
+                                            case "Pending":
+                                                <span class="badge bg-warning">Pending</span>
+                                                break;
+                                            case "Timeout":
+                                                <span class="badge bg-danger">Timeout</span>
+                                                break;
+                                            default:
+                                                <span class="badge bg-secondary">@transaction.Status</span>
+                                                break;
+                                        }
+                                    </td>
+                                    <td>
+                                        <span title="@transaction.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")">
+                                            @transaction.CreatedAt.ToString("MMM dd, HH:mm")
+                                        </span>
+                                        @if (transaction.PaidAt.HasValue)
+                                        {
+                                            <br>
+                                            <small class="text-success">
+                                                Paid: @transaction.PaidAt.Value.ToString("HH:mm:ss")
+                                            </small>
+                                        }
+                                    </td>
+                                    <td>
+                                        <code title="@transaction.InvoiceId">
+                                            @transaction.InvoiceId.Substring(0, Math.Min(8, transaction.InvoiceId.Length))...
+                                                    </code>
+                                    </td>
+                                    <td>
+                                        <a asp-action="CardDetails" asp-route-storeId="@Model.StoreId"
+                                            asp-route-cardId="@transaction.BoltcardId" class="btn btn-sm btn-outline-primary">
+                                            View Card
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<script>
+    // Auto-refresh the page every 30 seconds to show new transactions
+    setTimeout(function () {
+        location.reload();
+    }, 30000);
+
+    // Add real-time stats update via API
+    setInterval(function () {
+        fetch('@Url.Action("GetStats", new { storeId = Model.StoreId })')
+            .then(response => response.json())
+            .then(data => {
+                // Update stats without full page reload
+                // This is a placeholder for real-time updates
+            })
+            .catch(console.error);
+    }, 10000);
+</script>

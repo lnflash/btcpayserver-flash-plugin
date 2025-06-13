@@ -1,0 +1,115 @@
+@model BTCPayServer.Plugins.Flash.Models.FlashPluginSettings
+@{
+    ViewData["Title"] = "Flash Settings";
+}
+
+<partial name="_StatusMessage" />
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex align-items-center">
+                <img src="~/img/icons/flash.svg" width="50" height="50" class="me-3" alt="Flash Logo" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' width=\'50\' height=\'50\'><path d=\'M11 21h-1l1-7H7.5c-.58 0-.912-.753-.588-1.266L12.562 3h1l-1 7h3.5c.555 0 .869.73.55 1.221L11 21Z\' fill=\'%23FFD700\'/></svg>'" />
+                <h1 class="mb-0">Flash Settings</h1>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <form method="post" asp-action="Settings">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3 class="h5 mb-0">API Configuration</h3>
+                    </div>
+                    <div class="card-body">
+                        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+                        <div class="form-group mb-3">
+                            <label asp-for="BearerToken" class="form-label">API Bearer Token</label>
+                            <input asp-for="BearerToken" class="form-control" />
+                            <span asp-validation-for="BearerToken" class="text-danger"></span>
+                            <small class="form-text text-muted">
+                                Your Flash API bearer token. You can generate this in the Flash wallet app under Settings > Developer.
+                            </small>
+                        </div>
+
+                        <div class="form-group mb-3">
+                            <label asp-for="ApiEndpoint" class="form-label">API Endpoint URL</label>
+                            <input asp-for="ApiEndpoint" class="form-control" placeholder="https://api.flashapp.me/graphql" />
+                            <span asp-validation-for="ApiEndpoint" class="text-danger"></span>
+                            <small class="form-text text-muted">
+                                The Flash GraphQL API endpoint. Default: https://api.flashapp.me/graphql
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3 class="h5 mb-0">Advanced Settings</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group mb-3">
+                            <label asp-for="RequestTimeout" class="form-label">Request Timeout (seconds)</label>
+                            <input asp-for="RequestTimeout" class="form-control" type="number" min="5" max="120" />
+                            <span asp-validation-for="RequestTimeout" class="text-danger"></span>
+                            <small class="form-text text-muted">
+                                Timeout for API requests to Flash. Default: 30 seconds
+                            </small>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input asp-for="AllowLnurlAuth" class="form-check-input" type="checkbox" />
+                            <label asp-for="AllowLnurlAuth" class="form-check-label">Enable LNURL-Auth Support</label>
+                            <div class="form-text text-muted">
+                                Allow users to authenticate with LNURL-Auth using Flash wallet.
+                            </div>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input asp-for="AllowBoltcardTopup" class="form-check-input" type="checkbox" />
+                            <label asp-for="AllowBoltcardTopup" class="form-check-label">Enable Boltcard Topup</label>
+                            <div class="form-text text-muted">
+                                Allow users to top up Boltcards directly from your BTCPay Server.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                    <a asp-action="Dashboard" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="h5 mb-0">Getting Started</h3>
+                </div>
+                <div class="card-body">
+                    <p>To set up Flash integration:</p>
+                    <ol>
+                        <li>Download the Flash wallet from <a href="https://flashapp.me/" target="_blank">flashapp.me</a></li>
+                        <li>Create an account and set up your Lightning wallet</li>
+                        <li>Go to Settings > Developer to generate an API token</li>
+                        <li>Enter your API token in the form</li>
+                        <li>Save your settings</li>
+                    </ol>
+                    <p>Once configured, you can:</p>
+                    <ul>
+                        <li>Use Flash as a Lightning payment processor</li>
+                        <li>Top up Boltcards directly in BTCPay Server</li>
+                        <li>Utilize LNURL-Pay and LNURL-Withdraw features</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -91,6 +91,9 @@ namespace BTCPayServer.Plugins.Flash
         // Add a dictionary to track recently submitted payments and their status
         private readonly Dictionary<string, LightningPaymentStatus> _recentPayments = new Dictionary<string, LightningPaymentStatus>();
         private readonly Dictionary<string, DateTime> _paymentSubmitTimes = new Dictionary<string, DateTime>();
+        
+        // Add mapping from BOLT11 payment request to invoice ID for WebSocket updates
+        private readonly Dictionary<string, string> _bolt11ToInvoiceId = new Dictionary<string, string>();
 
         // Shared static Boltcard tracking across all instances
         private static readonly Dictionary<string, BoltcardTransaction> _boltcardTransactions = new Dictionary<string, BoltcardTransaction>();
@@ -256,7 +259,7 @@ namespace BTCPayServer.Plugins.Flash
                 {
                     _cachedWalletId = walletInfo.Id;
                     _cachedWalletCurrency = walletInfo.Currency;
-                    _logger.LogInformation("[WALLET INIT] ✅ SUCCESS: Found wallet ID: {WalletId} for currency: {Currency}", 
+                    _logger.LogInformation("[WALLET INIT] SUCCESS: Found wallet ID: {WalletId} for currency: {Currency}", 
                         _cachedWalletId, _cachedWalletCurrency);
                 }
                 else
@@ -289,10 +292,26 @@ namespace BTCPayServer.Plugins.Flash
             {
                 _logger.LogInformation($"[WebSocket] Received invoice update: InvoiceId={e.InvoiceId}, Status={e.Status}, PaidAt={e.PaidAt}");
 
+                // Map BOLT11 payment request back to invoice ID
+                string invoiceId;
+                lock (_invoiceTrackingLock)
+                {
+                    if (_bolt11ToInvoiceId.TryGetValue(e.InvoiceId, out invoiceId))
+                    {
+                        _logger.LogInformation($"[WebSocket] Mapped BOLT11 {e.InvoiceId} to invoice ID {invoiceId}");
+                    }
+                    else
+                    {
+                        // Fallback: assume e.InvoiceId is already the invoice ID
+                        invoiceId = e.InvoiceId;
+                        _logger.LogWarning($"[WebSocket] No BOLT11 mapping found for {e.InvoiceId}, using as invoice ID");
+                    }
+                }
+
                 // Check if we have this invoice in our pending list
                 lock (_invoiceTrackingLock)
                 {
-                    if (_pendingInvoices.TryGetValue(e.InvoiceId, out var invoice))
+                    if (_pendingInvoices.TryGetValue(invoiceId, out var invoice))
                     {
                         // Update invoice status based on WebSocket data
                         var updatedStatus = e.Status?.ToLowerInvariant() switch
@@ -319,13 +338,19 @@ namespace BTCPayServer.Plugins.Flash
                             };
 
                             // Remove from pending and notify BTCPay Server
-                            _pendingInvoices.Remove(e.InvoiceId);
+                            _pendingInvoices.Remove(invoiceId);
+                            
+                            // Clean up BOLT11 mapping
+                            if (!string.IsNullOrEmpty(invoice.BOLT11))
+                            {
+                                _bolt11ToInvoiceId.Remove(invoice.BOLT11);
+                            }
 
                             // Notify through the channel
                             if (_currentInvoiceListener != null)
                             {
                                 _currentInvoiceListener.Writer.TryWrite(invoice);
-                                _logger.LogInformation($"[WebSocket] Invoice {e.InvoiceId} marked as PAID and notified BTCPay Server");
+                                _logger.LogInformation($"[WebSocket] Invoice {invoiceId} marked as PAID and notified BTCPay Server");
                             }
 
                             // Notification already handled through the channel above
@@ -333,8 +358,15 @@ namespace BTCPayServer.Plugins.Flash
                         else if (updatedStatus == LightningInvoiceStatus.Expired)
                         {
                             // Remove from pending invoices
-                            _pendingInvoices.Remove(e.InvoiceId);
-                            _logger.LogInformation($"[WebSocket] Invoice {e.InvoiceId} marked as {updatedStatus}");
+                            _pendingInvoices.Remove(invoiceId);
+                            
+                            // Clean up BOLT11 mapping
+                            if (!string.IsNullOrEmpty(invoice.BOLT11))
+                            {
+                                _bolt11ToInvoiceId.Remove(invoice.BOLT11);
+                            }
+                            
+                            _logger.LogInformation($"[WebSocket] Invoice {invoiceId} marked as {updatedStatus}");
                         }
                     }
                 }
@@ -431,7 +463,15 @@ namespace BTCPayServer.Plugins.Flash
             try
             {
                 // Delegate to the invoice service
-                return await _invoiceService.CreateInvoiceAsync(createParams, cancellation);
+                var invoice = await _invoiceService.CreateInvoiceAsync(createParams, cancellation);
+                
+                // Track the invoice to enable WebSocket subscriptions
+                if (invoice != null)
+                {
+                    TrackPendingInvoice(invoice);
+                }
+                
+                return invoice;
             }
             catch (Exception ex)
             {
@@ -444,7 +484,15 @@ namespace BTCPayServer.Plugins.Flash
         public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default)
         {
             // Delegate to the invoice service
-            return await _invoiceService.CreateInvoiceAsync(amount, description, expiry, cancellation);
+            var invoice = await _invoiceService.CreateInvoiceAsync(amount, description, expiry, cancellation);
+            
+            // Track the invoice to enable WebSocket subscriptions
+            if (invoice != null)
+            {
+                TrackPendingInvoice(invoice);
+            }
+            
+            return invoice;
         }
 
         public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = default)
@@ -1294,7 +1342,75 @@ namespace BTCPayServer.Plugins.Flash
             try
             {
                 // Delegate to the invoice service
-                return await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
+                var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
+                
+                // For LNURL/Boltcard invoices, we need to handle both unpaid and paid states
+                if (invoice != null)
+                {
+                    bool shouldTrack = false;
+                    bool isNewInvoice = false;
+                    
+                    // Check if we're already tracking this invoice
+                    lock (_invoiceTrackingLock)
+                    {
+                        if (!_pendingInvoices.ContainsKey(invoice.Id))
+                        {
+                            isNewInvoice = true;
+                            // Track if unpaid, or if paid but has BOLT11 (likely LNURL)
+                            if (invoice.Status == LightningInvoiceStatus.Unpaid || 
+                                (invoice.Status == LightningInvoiceStatus.Paid && !string.IsNullOrEmpty(invoice.BOLT11)))
+                            {
+                                shouldTrack = true;
+                            }
+                        }
+                    }
+                    
+                    if (shouldTrack)
+                    {
+                        _logger.LogInformation($"[GetInvoice] Found {invoice.Status} invoice {invoice.Id}, BOLT11: {!string.IsNullOrEmpty(invoice.BOLT11)}, adding to tracking");
+                        
+                        // Track the invoice
+                        TrackPendingInvoice(invoice);
+                        
+                        // For already paid LNURL invoices, ensure the payment is properly marked
+                        if (invoice.Status == LightningInvoiceStatus.Paid && invoice.AmountReceived != null)
+                        {
+                            _logger.LogInformation($"[GetInvoice] LNURL invoice {invoice.Id} is already paid, ensuring it's marked as paid");
+                            var amountSats = (long)(invoice.AmountReceived.MilliSatoshi / 1000);
+                            
+                            // Mark as paid in background to avoid blocking
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await _invoiceService.MarkInvoiceAsPaidAsync(invoice.Id, amountSats);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "[GetInvoice] Failed to mark LNURL invoice as paid");
+                                }
+                            });
+                        }
+                        // For unpaid invoices with BOLT11, start WebSocket subscription
+                        else if (invoice.Status == LightningInvoiceStatus.Unpaid && !string.IsNullOrEmpty(invoice.BOLT11) && _webSocketService != null)
+                        {
+                            _logger.LogInformation($"[GetInvoice] Starting WebSocket tracking for unpaid LNURL invoice {invoice.Id}");
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await _webSocketService.SubscribeToInvoiceUpdatesAsync(invoice.BOLT11, cancellation);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "[GetInvoice] Failed to subscribe to WebSocket updates");
+                                }
+                            });
+                        }
+                    }
+                }
+                
+                return invoice;
             }
             catch (Exception ex)
             {
@@ -1528,7 +1644,30 @@ namespace BTCPayServer.Plugins.Flash
         public async Task<LightningInvoice> GetInvoice(uint256 invoiceId, CancellationToken cancellation = default)
         {
             // Delegate to the invoice service
-            return await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
+            var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
+            
+            // If the invoice is unpaid and not already tracked, track it for WebSocket updates
+            if (invoice != null && invoice.Status == LightningInvoiceStatus.Unpaid)
+            {
+                bool shouldTrack = false;
+                
+                // Check if we're already tracking this invoice
+                lock (_invoiceTrackingLock)
+                {
+                    if (!_pendingInvoices.ContainsKey(invoice.Id))
+                    {
+                        shouldTrack = true;
+                    }
+                }
+                
+                if (shouldTrack)
+                {
+                    _logger.LogInformation($"[GetInvoice] Found unpaid invoice {invoice.Id}, adding to tracking");
+                    TrackPendingInvoice(invoice);
+                }
+            }
+            
+            return invoice;
         }
 
         public Task<LightningInvoice[]> ListInvoices(CancellationToken cancellation = default)
@@ -2437,6 +2576,13 @@ namespace BTCPayServer.Plugins.Flash
                     // Store a copy of the invoice
                     _pendingInvoices[invoice.Id] = invoice;
                     _invoiceCreationTimes[invoice.Id] = DateTime.UtcNow;
+                    
+                    // Add BOLT11 to invoice ID mapping for WebSocket updates
+                    if (!string.IsNullOrEmpty(invoice.BOLT11))
+                    {
+                        _bolt11ToInvoiceId[invoice.BOLT11] = invoice.Id;
+                        _logger.LogDebug($"[WebSocket] Added BOLT11 mapping: {invoice.BOLT11} -> {invoice.Id}");
+                    }
 
                     // Register it for tracking in the PollInvoices method
                     _logger.LogInformation($"[INVOICE DEBUG] Added invoice {invoice.Id} to pending invoices dictionary (now contains {_pendingInvoices.Count} invoices)");
@@ -2452,8 +2598,10 @@ namespace BTCPayServer.Plugins.Flash
                     {
                         try
                         {
-                            await _webSocketService.SubscribeToInvoiceUpdatesAsync(invoice.Id);
-                            _logger.LogInformation($"[WebSocket] Subscribed to real-time updates for invoice {invoice.Id}");
+                            // Use BOLT11 for subscription, not invoice ID
+                            var paymentRequest = !string.IsNullOrEmpty(invoice.BOLT11) ? invoice.BOLT11 : invoice.Id;
+                            await _webSocketService.SubscribeToInvoiceUpdatesAsync(paymentRequest);
+                            _logger.LogInformation($"[WebSocket] Subscribed to real-time updates for invoice {invoice.Id} using payment request: {paymentRequest}");
                         }
                         catch (Exception ex)
                         {
@@ -2490,6 +2638,12 @@ namespace BTCPayServer.Plugins.Flash
                 {
                     foreach (var key in keysToRemove)
                     {
+                        // Clean up BOLT11 mapping before removing invoice
+                        if (_pendingInvoices.TryGetValue(key, out var invoice) && !string.IsNullOrEmpty(invoice.BOLT11))
+                        {
+                            _bolt11ToInvoiceId.Remove(invoice.BOLT11);
+                        }
+                        
                         _invoiceCreationTimes.Remove(key);
                         _pendingInvoices.Remove(key);
                     }
@@ -2767,7 +2921,7 @@ namespace BTCPayServer.Plugins.Flash
                     var finalCheck = await CheckFlashTransactionHistory(paymentHash, amountSats);
                     if (finalCheck)
                     {
-                        _logger.LogInformation($"[BOLTCARD DEBUG] ✅ VERIFIED: Final check confirmed payment was actually received in Flash wallet: {paymentHash}");
+                        _logger.LogInformation($"[BOLTCARD DEBUG] VERIFIED: Final check confirmed payment was actually received in Flash wallet: {paymentHash}");
                     }
                     else
                     {
@@ -2824,7 +2978,7 @@ namespace BTCPayServer.Plugins.Flash
 
                     if (invoice.Status == LightningInvoiceStatus.Paid)
                     {
-                        _logger.LogInformation($"[BOLTCARD DEBUG] ✅ Flash API confirms invoice is PAID! Amount received: {invoice.AmountReceived}");
+                        _logger.LogInformation($"[BOLTCARD DEBUG] Flash API confirms invoice is PAID! Amount received: {invoice.AmountReceived}");
                     }
 
                     return invoice.Status;
@@ -2987,7 +3141,7 @@ namespace BTCPayServer.Plugins.Flash
                                         if (_transactionSequences.ContainsKey(sequenceMatch) &&
                                             _transactionSequences[sequenceMatch] == paymentHash)
                                         {
-                                            _logger.LogInformation($"[BOLTCARD DEBUG] ✅ PERFECT MATCH: Found exact sequence correlation: {sequenceMatch}");
+                                            _logger.LogInformation($"[BOLTCARD DEBUG] PERFECT MATCH: Found exact sequence correlation: {sequenceMatch}");
                                             _logger.LogInformation($"[BOLTCARD DEBUG] Transaction: {tx.id}, Amount: {txAmount}, Expected: {expectedAmount} sats");
                                             return true;
                                         }
@@ -3011,7 +3165,7 @@ namespace BTCPayServer.Plugins.Flash
                                 // Check if amount is within tolerance
                                 if (Math.Abs(txAmount - expectedAmount) <= tolerance)
                                 {
-                                    _logger.LogInformation($"[BOLTCARD DEBUG] ✅ TIMING + AMOUNT MATCH: Found recent transaction within tolerance");
+                                    _logger.LogInformation($"[BOLTCARD DEBUG] TIMING + AMOUNT MATCH: Found recent transaction within tolerance");
                                     _logger.LogInformation($"[BOLTCARD DEBUG] Transaction: {tx.id}, Amount: {txAmount} (±{tolerance}), Expected: {expectedAmount} sats, Age: {timeSinceCreated.TotalSeconds:F1}s");
                                     return true;
                                 }
@@ -3024,7 +3178,7 @@ namespace BTCPayServer.Plugins.Flash
                                         _logger.LogWarning($"[BOLTCARD DEBUG] ⚠️ FLASH API UNIT CONVERSION BUG DETECTED!");
                                         _logger.LogWarning($"[BOLTCARD DEBUG] Expected: {expectedAmount} sats, but Flash received: {txAmount}");
                                         _logger.LogWarning($"[BOLTCARD DEBUG] This indicates a Flash API bug in amount conversion.");
-                                        _logger.LogInformation($"[BOLTCARD DEBUG] ✅ ACCEPTING due to very recent timing correlation (within 10 seconds)");
+                                        _logger.LogInformation($"[BOLTCARD DEBUG] ACCEPTING due to very recent timing correlation (within 10 seconds)");
                                         return true;
                                     }
                                 }
@@ -3302,7 +3456,7 @@ namespace BTCPayServer.Plugins.Flash
                         var notified = listener.Writer.TryWrite(paidInvoice);
                         if (notified)
                         {
-                            _logger.LogInformation($"[BOLTCARD DEBUG] ✅ SUCCESS: BTCPay Server notified about paid invoice {paymentHash} - Boltcard should be credited!");
+                            _logger.LogInformation($"[BOLTCARD DEBUG] SUCCESS: BTCPay Server notified about paid invoice {paymentHash} - Boltcard should be credited!");
                         }
                         else
                         {

@@ -32,9 +32,9 @@ namespace BTCPayServer.Plugins.Flash.Services
         event EventHandler<InvoiceUpdateEventArgs> InvoiceUpdated;
 
         /// <summary>
-        /// Subscribe to real-time updates for a specific invoice
+        /// Subscribe to real-time updates for a specific invoice payment request
         /// </summary>
-        Task SubscribeToInvoiceUpdatesAsync(string invoiceId, CancellationToken cancellation = default);
+        Task SubscribeToInvoiceUpdatesAsync(string paymentRequest, CancellationToken cancellation = default);
 
         /// <summary>
         /// Unsubscribe from updates for a specific invoice

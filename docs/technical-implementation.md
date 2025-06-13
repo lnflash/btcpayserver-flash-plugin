@@ -12,6 +12,67 @@ The Flash plugin integrates with the Flash Lightning Network API using GraphQL q
 2. **FlashLnurlHelper**: Handles LNURL and Lightning Address resolution and processing.
 3. **GraphQL Communication**: Uses GraphQLClient to communicate with Flash's API.
 
+## Plugin Versioning and Deployment
+
+### Critical Versioning Requirements
+
+The plugin version must be specified in three separate locations, all of which must be kept in sync:
+
+1. **FlashPlugin.cs**: The `Version` property in the plugin class:
+   ```csharp
+   public override Version Version => new Version(1, 3, 5);
+   ```
+
+2. **manifest.json**: The version string in the manifest file:
+   ```json
+   {
+     "version": "1.3.5",
+     ...
+   }
+   ```
+
+3. **BTCPayServer.Plugins.Flash.csproj**: The `Version` property in the project file:
+   ```xml
+   <PropertyGroup>
+     <Version>1.3.5</Version>
+     ...
+   </PropertyGroup>
+   ```
+
+**Important**: The `.csproj` file version is the most critical as it controls the actual assembly version that BTCPayServer uses to identify and load the plugin. If this version doesn't match what's in the other files, BTCPayServer will display the wrong version in logs and UI.
+
+### Build and Package Process
+
+The build script (`build-package.sh`) compiles the plugin and packages it for distribution:
+
+1. Builds the project with `dotnet build -c Release`
+2. Publishes the project with `dotnet publish -c Release`
+3. Copies the necessary files to a package directory
+4. Creates a .btcpay package file using ZIP compression
+
+### Installation Options
+
+1. **BTCPay Server Admin UI** (Standard):
+   - Upload the .btcpay package through the Server Settings > Plugins page
+   - Restart BTCPayServer to complete installation
+
+2. **Direct Installation** (For troubleshooting):
+   - Extract the .btcpay package
+   - Copy files to `/root/.btcpayserver/Plugins/BTCPayServer.Plugins.Flash/`
+   - Restart BTCPayServer
+
+### Version Testing
+
+After installing, verify the correct version appears in BTCPayServer logs:
+```
+info: BTCPayServer.Plugins.PluginManager: Adding and executing plugin BTCPayServer.Plugins.Flash - 1.3.5
+```
+
+If the version is incorrect or the plugin doesn't load, check:
+1. All three version locations are in sync
+2. The plugin files are in the correct location
+3. There are no errors in the BTCPayServer logs
+
 ## Payment Status Tracking System
 
 The plugin implements a sophisticated payment tracking system to handle asynchronous payment flows, especially for LNURL payments in pull payment scenarios:
@@ -105,6 +166,52 @@ The plugin now provides detailed diagnostic information at every stage:
 3. **Logging Improvements**:
    - Consistent [PAYMENT DEBUG] prefixing for payment-related logs
    - Enhanced logging of invoice details, wallet state, and API interactions
+
+## Special Features
+
+### Boltcard Topup Support
+
+Version 1.3.6 introduces dedicated Boltcard topup functionality:
+
+1. **UI Flow**: 
+   - Main Dashboard at `/plugins/flash`
+   - Boltcard topup page at `/plugins/flash/boltcard` (currently has 404 routing issue)
+   - Invoice display page
+   - Success confirmation page
+
+2. **Streamlined Flow**:
+   - Simple form for entering topup amount
+   - Direct invoice generation with "Flashcard topup" memo
+   - QR code for scanning with Flash mobile wallet
+   - Success confirmation with transaction details
+
+3. **Controller Implementation**:
+   - Two separate controller implementations:
+     - `BoltcardTopupController` with route `plugins/{storeId}/Flash/Boltcard` (original approach)
+     - `UIFlashController` with route `plugins/flash` (new approach)
+   - Creates invoices directly via FlashLightningClient
+   - Bypasses problematic LNURL handling in BTCPayServer
+   - Mobile-friendly UI with QR code and deep link support
+   
+4. **Current Issues**:
+   - 404 Error when accessing `/plugins/flash/boltcard`
+   - Likely routing issue with view resolution
+   - Form submission works correctly when page loads
+
+### Pull Payment Support
+
+The plugin supports BTCPayServer's pull payment system:
+
+1. **LNURL-withdraw Integration**: 
+   - Handles LNURL-withdraw protocol for Lightning payments
+   - Validates and processes withdrawal requests
+   - Creates invoices on user request
+   - Tracks payment status and updates BTCPayServer
+
+2. **Multi-crypto Support**:
+   - Works with both BTC and USD denominated wallets
+   - Handles currency conversion for Lightning payments
+   - Supports both amount and no-amount invoice scenarios
 
 ## Technical Implementation Notes
 
@@ -237,4 +344,3 @@ Potential future improvements to the implementation include:
 4. Add support for other mutation types like intraLedgerPaymentSend
 5. Improve the basic invoice decoder to extract more details like payment hash and expiry
 6. Add persistent storage for payment status tracking
-7. Implement webhook callbacks for payment status updates 

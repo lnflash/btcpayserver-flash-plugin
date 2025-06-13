@@ -167,7 +167,7 @@ namespace BTCPayServer.Plugins.Flash.Services
         {
             try
             {
-                _logger.LogInformation("Querying invoice status for {InvoiceId}", invoiceId);
+                _logger.LogInformation("[BOLTCARD] GetInvoiceAsync called for {InvoiceId}", invoiceId);
 
                 // Occasionally clean up old pending invoices
                 CleanupOldPendingInvoices();
@@ -175,7 +175,8 @@ namespace BTCPayServer.Plugins.Flash.Services
                 // First check if this is a pending invoice we're tracking
                 if (_pendingInvoices.TryGetValue(invoiceId, out var pendingInvoice))
                 {
-                    _logger.LogInformation("Found invoice {InvoiceId} in pending cache", invoiceId);
+                    _logger.LogInformation("[BOLTCARD] Found invoice {InvoiceId} in pending cache, Status: {Status}", 
+                        invoiceId, pendingInvoice.Status);
 
                     // If it's been less than 10 seconds since creation, just return it as is
                     // This gives the API time to index the new transaction
@@ -188,11 +189,105 @@ namespace BTCPayServer.Plugins.Flash.Services
                     }
                 }
 
+                // Check if this might be a Boltcard/LNURL invoice that we haven't seen before
+                if (!_pendingInvoices.ContainsKey(invoiceId))
+                {
+                    _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} not in cache - this is likely a Boltcard/LNURL invoice", invoiceId);
+                    
+                    // For Boltcard invoices, we need to aggressively check payment status
+                    // because BTCPayServer expects immediate updates
+                    
+                    // First, check recent transactions to see if this was just paid
+                    var recentTransactions = await _graphQLService.GetTransactionHistoryAsync(10, cancellation);
+                    var matchingTx = recentTransactions.FirstOrDefault(t => 
+                        t.Id == invoiceId || 
+                        (t.Memo != null && t.Memo.Contains(invoiceId)) ||
+                        (t.CreatedAt > DateTime.UtcNow.AddMinutes(-1) && Math.Abs(t.SettlementAmount ?? 0) < 1000));
+                    
+                    if (matchingTx != null && matchingTx.Status?.ToLowerInvariant() == "success")
+                    {
+                        _logger.LogInformation("[BOLTCARD] Found matching paid transaction for invoice {InvoiceId}! Amount: {Amount} sats", 
+                            invoiceId, Math.Abs(matchingTx.SettlementAmount ?? 0));
+                        
+                        var paidInvoice = new LightningInvoice
+                        {
+                            Id = invoiceId,
+                            PaymentHash = invoiceId,
+                            Status = LightningInvoiceStatus.Paid,
+                            Amount = LightMoney.Satoshis(Math.Abs(matchingTx.SettlementAmount ?? 0)),
+                            AmountReceived = LightMoney.Satoshis(Math.Abs(matchingTx.SettlementAmount ?? 0)),
+                            PaidAt = new DateTimeOffset(matchingTx.CreatedAt, TimeSpan.Zero),
+                            ExpiresAt = DateTime.UtcNow.AddDays(1)
+                        };
+                        
+                        // CRITICAL: Notify BTCPayServer immediately
+                        lock (_invoiceTrackingLock)
+                        {
+                            _pendingInvoices[invoiceId] = paidInvoice;
+                            _invoiceCreationTimes[invoiceId] = DateTime.UtcNow;
+                        }
+                        
+                        await MarkInvoiceAsPaidAsync(invoiceId, Math.Abs(matchingTx.SettlementAmount ?? 0));
+                        
+                        return paidInvoice;
+                    }
+                    
+                    // If not found in recent transactions, create a tracking entry
+                    var potentialBoltcardInvoice = new LightningInvoice
+                    {
+                        Id = invoiceId,
+                        PaymentHash = invoiceId,
+                        Status = LightningInvoiceStatus.Unpaid,
+                        Amount = LightMoney.Satoshis(1000), // Default amount
+                        ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+                        BOLT11 = "" // We don't have the BOLT11 yet
+                    };
+                    
+                    // Add to tracking
+                    lock (_invoiceTrackingLock)
+                    {
+                        _pendingInvoices[invoiceId] = potentialBoltcardInvoice;
+                        _invoiceCreationTimes[invoiceId] = DateTime.UtcNow;
+                    }
+                    
+                    _logger.LogInformation("[BOLTCARD] Added potential Boltcard invoice {InvoiceId} to tracking for monitoring", invoiceId);
+                    
+                    // Start aggressive monitoring for this invoice
+                    _ = Task.Run(async () => 
+                    {
+                        for (int i = 0; i < 10; i++) // Check for 20 seconds
+                        {
+                            await Task.Delay(2000);
+                            
+                            var status = await _graphQLService.GetInvoiceStatusAsync(invoiceId, cancellation);
+                            if (status != null && status.IsPaid)
+                            {
+                                _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} detected as PAID in monitoring loop!", invoiceId);
+                                await MarkInvoiceAsPaidAsync(invoiceId, status.AmountReceived ?? 1000);
+                                break;
+                            }
+                            
+                            // Also check transaction history
+                            var txs = await _graphQLService.GetTransactionHistoryAsync(5, cancellation);
+                            var paidTx = txs.FirstOrDefault(t => 
+                                (t.Id == invoiceId || (t.Memo != null && t.Memo.Contains(invoiceId))) && 
+                                t.Status?.ToLowerInvariant() == "success");
+                                
+                            if (paidTx != null)
+                            {
+                                _logger.LogInformation("[BOLTCARD] Found paid transaction for {InvoiceId} in monitoring loop!", invoiceId);
+                                await MarkInvoiceAsPaidAsync(invoiceId, Math.Abs(paidTx.SettlementAmount ?? 0));
+                                break;
+                            }
+                        }
+                    });
+                }
+
                 // First, try to get invoice status directly by payment hash
                 var invoiceStatus = await _graphQLService.GetInvoiceStatusAsync(invoiceId, cancellation);
                 if (invoiceStatus != null && invoiceStatus.IsPaid)
                 {
-                    _logger.LogInformation("Invoice {InvoiceId} is PAID according to Flash API", invoiceId);
+                    _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} is PAID according to Flash API (second check)", invoiceId);
                     
                     var paidInvoice = new LightningInvoice
                     {
@@ -392,7 +487,7 @@ namespace BTCPayServer.Plugins.Flash.Services
 
                 if (paidInvoice != null && listener != null)
                 {
-                    _logger.LogInformation("🚀 NOTIFYING BTCPAY SERVER: Invoice {PaymentHash} paid for {AmountSats} sats - This should credit the Boltcard!",
+                    _logger.LogInformation("NOTIFYING BTCPAY SERVER: Invoice {PaymentHash} paid for {AmountSats} sats - This should credit the Boltcard!",
                         paymentHash, amountSats);
 
                     try
@@ -400,21 +495,21 @@ namespace BTCPayServer.Plugins.Flash.Services
                         var notified = listener.Writer.TryWrite(paidInvoice);
                         if (notified)
                         {
-                            _logger.LogInformation("✅ SUCCESS: BTCPay Server notified about paid invoice {PaymentHash} - Boltcard should be credited!", paymentHash);
+                            _logger.LogInformation("SUCCESS: BTCPay Server notified about paid invoice {PaymentHash} - Boltcard should be credited!", paymentHash);
                         }
                         else
                         {
-                            _logger.LogError("❌ FAILED: Could not notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
+                            _logger.LogError("FAILED: Could not notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "❌ ERROR: Failed to notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
+                        _logger.LogError(ex, "ERROR: Failed to notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("❌ MISSING: No invoice listener available to notify BTCPay Server - Boltcard will NOT be credited! (paidInvoice: {HasInvoice}, listener: {HasListener})",
+                    _logger.LogWarning("MISSING: No invoice listener available to notify BTCPay Server - Boltcard will NOT be credited! (paidInvoice: {HasInvoice}, listener: {HasListener})",
                         paidInvoice != null, listener != null);
                 }
             }

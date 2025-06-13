@@ -1,0 +1,174 @@
+@{
+    ViewData["Title"] = "Lightning Invoice";
+    Layout = "_Layout";
+    
+    var invoice = ViewData["Invoice"] as string;
+    var amount = ViewData["Amount"] as long? ?? 5000;
+    var description = ViewData["Description"] as string ?? "Flashcard topup";
+    var invoiceId = ViewData["InvoiceId"] as string;
+}
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex align-items-center">
+                <img src="~/img/icons/flash.svg" width="50" height="50" class="me-3" alt="Flash Logo" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' width=\'50\' height=\'50\'><path d=\'M11 21h-1l1-7H7.5c-.58 0-.912-.753-.588-1.266L12.562 3h1l-1 7h3.5c.555 0 .869.73.55 1.221L11 21Z\' fill=\'%23FFD700\'/></svg>'" />
+                <div>
+                    <h1 class="mb-0">Lightning Invoice</h1>
+                    <p class="text-muted mb-0">Flash Plugin v@(ViewData["PluginVersion"])</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-8 offset-lg-2">
+            <div class="card text-center">
+                <div class="card-header bg-primary text-white">
+                    <h2 class="h4 mb-0"><i class="fas fa-bolt me-2"></i>Scan with Flash Wallet</h2>
+                </div>
+                <div class="card-body">
+                    <h3 class="mb-3">@amount satoshis</h3>
+                    <p class="text-muted mb-4">@description</p>
+                    
+                    <div class="p-4 bg-light rounded mx-auto d-inline-block mb-4">
+                        <div id="qrcode" style="width:250px; height:250px;"></div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <a href="lightning:@invoice" class="btn btn-primary btn-lg mb-3 w-100">
+                            <i class="fas fa-external-link-alt me-2"></i>Open in Lightning Wallet
+                        </a>
+                        
+                        <div class="d-flex gap-2">
+                            <button id="copy-invoice" class="btn btn-outline-primary flex-grow-1" onclick="copyInvoice()">
+                                <i class="fas fa-copy me-2"></i>Copy Invoice
+                            </button>
+                            <button id="check-status" class="btn btn-outline-secondary flex-grow-1">
+                                <i class="fas fa-sync-alt me-2"></i>Check Status
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span>Wait for payment confirmation. This page will automatically update.</span>
+                    </div>
+                    
+                    <div class="progress mb-3">
+                        <div id="expiry-progress" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                    </div>
+                    
+                    <small class="text-muted">
+                        Invoice expires in <span id="expiry-time">60:00</span>
+                    </small>
+                    
+                    <!-- Hidden element for copy functionality -->
+                    <textarea id="invoice-text" style="position: absolute; left: -9999px;">@invoice</textarea>
+                </div>
+                <div class="card-footer">
+                    <div class="d-flex justify-content-between">
+                        <a href="/plugins/flash/boltcard" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left me-2"></i>Back
+                        </a>
+                        <a href="/plugins/flash" class="btn btn-outline-secondary">
+                            <i class="fas fa-home me-2"></i>Dashboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script>
+        // Generate QR code
+        var qrcode = new QRCode(document.getElementById("qrcode"), {
+            text: "@invoice",
+            width: 250,
+            height: 250,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
+        
+        // Copy invoice to clipboard
+        function copyInvoice() {
+            const invoiceText = document.getElementById('invoice-text');
+            invoiceText.select();
+            document.execCommand('copy');
+            
+            const copyBtn = document.getElementById('copy-invoice');
+            const originalText = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<i class="fas fa-check me-2"></i>Copied!';
+            
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+            }, 2000);
+        }
+        
+        // Countdown timer
+        const expiryEl = document.getElementById('expiry-time');
+        const progressBar = document.getElementById('expiry-progress');
+        let totalSeconds = 60 * 60; // 60 minutes
+        const startTime = Date.now();
+        const endTime = startTime + (totalSeconds * 1000);
+        
+        function updateTimer() {
+            const now = Date.now();
+            const remaining = Math.max(0, endTime - now);
+            const remainingSeconds = Math.floor(remaining / 1000);
+            
+            if (remainingSeconds <= 0) {
+                expiryEl.textContent = "Expired";
+                progressBar.style.width = "0%";
+                return;
+            }
+            
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            expiryEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            // Update progress bar
+            const percentRemaining = (remainingSeconds / totalSeconds) * 100;
+            progressBar.style.width = `${percentRemaining}%`;
+            
+            // Change color based on time remaining
+            if (percentRemaining < 25) {
+                progressBar.classList.remove('bg-primary', 'bg-warning');
+                progressBar.classList.add('bg-danger');
+            } else if (percentRemaining < 50) {
+                progressBar.classList.remove('bg-primary', 'bg-danger');
+                progressBar.classList.add('bg-warning');
+            }
+            
+            setTimeout(updateTimer, 1000);
+        }
+        
+        // Start the countdown
+        updateTimer();
+        
+        // In a real implementation, this would be a WebSocket or a polling mechanism
+        // to check if the invoice has been paid
+        document.getElementById('check-status').addEventListener('click', function() {
+            this.disabled = true;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Checking...';
+            
+            // Simulate an API call with a delay
+            setTimeout(() => {
+                // In production, this would be a real API call to check the payment status
+                const randomSuccess = Math.random() > 0.7;
+                
+                if (randomSuccess) {
+                    window.location.href = '/plugins/flash/boltcard/success?invoiceId=@invoiceId';
+                } else {
+                    this.disabled = false;
+                    this.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Check Status';
+                    alert('Payment not detected yet. Please try again after payment is complete.');
+                }
+            }, 1500);
+        });
+    </script>
+}

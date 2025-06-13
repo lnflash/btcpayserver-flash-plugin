@@ -24,8 +24,21 @@ cp manifest.json $PACKAGE_DIR/
 cp manifest.json $PACKAGE_DIR/BTCPayServer.Plugins.Flash.json
 
 # Copy Views files correctly
+# Shared views
 mkdir -p $PACKAGE_DIR/Views/Shared/Flash
 cp Views/Shared/Flash/LNPaymentMethodSetupTab.cshtml $PACKAGE_DIR/Views/Shared/Flash/
+
+# Flash views
+mkdir -p $PACKAGE_DIR/Views/Flash
+cp Views/Flash/LNPaymentMethodSetupTab.cshtml $PACKAGE_DIR/Views/Flash/
+cp Views/Flash/Settings.cshtml $PACKAGE_DIR/Views/Flash/
+
+# BoltcardTopup views
+mkdir -p $PACKAGE_DIR/Views/BoltcardTopup
+cp Views/BoltcardTopup/Topup.cshtml $PACKAGE_DIR/Views/BoltcardTopup/
+cp Views/BoltcardTopup/Invoice.cshtml $PACKAGE_DIR/Views/BoltcardTopup/
+cp Views/BoltcardTopup/Success.cshtml $PACKAGE_DIR/Views/BoltcardTopup/
+
 cp _ViewImports.cshtml $PACKAGE_DIR/
 
 # Create the BTCPay plugin package

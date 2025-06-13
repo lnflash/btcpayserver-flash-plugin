@@ -11238,7 +11238,7 @@
     "/Users/dread/.nuget/packages/": {}
   },
   "project": {
-    "version": "1.3.0",
+    "version": "1.4.0",
     "restore": {
       "projectUniqueName": "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/BTCPayServer.Plugins.Flash.csproj",
       "projectName": "BTCPayServer.Plugins.Flash",

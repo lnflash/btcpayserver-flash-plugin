@@ -43,7 +43,9 @@ namespace BTCPayServer.Plugins.Flash
                 return new FlashLightningClient(
                     flashConnectionString.BearerToken,
                     new Uri(flashConnectionString.Endpoint),
-                    _loggerFactory.CreateLogger<FlashLightningClient>());
+                    _loggerFactory.CreateLogger<FlashLightningClient>(),
+                    httpClient: null,
+                    loggerFactory: _loggerFactory);
             }
             catch (Exception ex)
             {
@@ -65,7 +67,9 @@ namespace BTCPayServer.Plugins.Flash
             return new FlashLightningClient(
                 flashConnectionString.BearerToken,
                 new Uri(flashConnectionString.Endpoint),
-                _loggerFactory.CreateLogger<FlashLightningClient>());
+                _loggerFactory.CreateLogger<FlashLightningClient>(),
+                httpClient: null,
+                loggerFactory: _loggerFactory);
         }
 
         public async Task<object> GetLightningClient(string connectionString, BTCPayNetwork network, CancellationToken cancellation)
@@ -82,7 +86,9 @@ namespace BTCPayServer.Plugins.Flash
                 var client = new FlashLightningClient(
                     flashConnectionString.BearerToken,
                     new Uri(flashConnectionString.Endpoint),
-                    _loggerFactory.CreateLogger<FlashLightningClient>());
+                    _loggerFactory.CreateLogger<FlashLightningClient>(),
+                    httpClient: null,
+                    loggerFactory: _loggerFactory);
 
                 // Verify the connection works by calling GetInfo
                 await client.GetInfo(cancellation);

@@ -20,21 +20,11 @@ namespace BTCPayServer.Plugins.Flash.Models
         public FlashPullPaymentHandler(ILogger<FlashPullPaymentHandler> logger, FlashLightningClient flashClient = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _flashClient = flashClient;
 
-            if (flashClient == null)
+            if (_flashClient == null)
             {
-                _logger.LogWarning("FlashLightningClient was not provided to FlashPullPaymentHandler, creating a default instance");
-                // Create a default client for development/testing
-                var loggerFactory = new Microsoft.Extensions.Logging.LoggerFactory();
-                var clientLogger = loggerFactory.CreateLogger<FlashLightningClient>();
-                _flashClient = new FlashLightningClient(
-                    "development_token",
-                    new Uri("https://api.flashapp.me/graphql"),
-                    clientLogger);
-            }
-            else
-            {
-                _flashClient = flashClient;
+                _logger.LogWarning("FlashLightningClient was not provided to FlashPullPaymentHandler - Flash pull payments will not be available until configured");
             }
         }
 
@@ -54,10 +44,16 @@ namespace BTCPayServer.Plugins.Flash.Models
         {
             try
             {
+                if (_flashClient == null)
+                {
+                    _logger.LogWarning("Flash Lightning client not configured - cannot process LNURL-withdraw");
+                    return (null, "Flash Lightning client not configured");
+                }
+
                 _logger.LogInformation($"Processing LNURL-withdraw for endpoint: {lnurlWithdrawEndpoint} with amount {amountSat} sats");
 
                 // Use the existing LnurlHandler to parse the withdraw endpoint
-                var lnurlHelper = new FlashLnurlHelper(_logger);
+                var lnurlHelper = new Models.FlashLnurlHelper(_logger);
                 var handler = new LnurlHandler(_logger);
 
                 // First, get the withdraw parameters from the endpoint

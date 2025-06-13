@@ -1,0 +1,43 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.Flash
+@using BTCPayServer.Security
+@inject IScopeProvider ScopeProvider
+
+@{
+    var storeId = Model switch
+    {
+        string s => s,
+        StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
+        _ => Context.GetImplicitStoreId()
+    };
+    var active = @ViewData.IsActivePage("Flash");
+    var controllerName = ViewContext.RouteData.Values["controller"]?.ToString();
+    var actionName = ViewContext.RouteData.Values["action"]?.ToString();
+}
+
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="FlashMain" asp-action="Index" asp-route-storeId="@storeId" class="nav-link @active" id="Nav-Flash">
+            <span class="nav-icon">
+                <i class="fas fa-bolt" style="color: #FFD700;"></i>
+            </span>
+            <span class="nav-text">Flash</span>
+        </a>
+    </li>
+
+    <li class="nav-item nav-item-sub">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="FlashMain" asp-action="Dashboard" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Flash", null, "Dashboard")">Dashboard</a>
+    </li>
+    
+    <li class="nav-item nav-item-sub">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="BoltcardTopup" asp-action="Topup" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Flash", null, "BoltcardTopup")">Boltcard Topup</a>
+    </li>
+    
+    <li class="nav-item nav-item-sub">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="FlashMain" asp-action="Settings" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Flash", null, "Settings")">Settings</a>
+    </li>
+}

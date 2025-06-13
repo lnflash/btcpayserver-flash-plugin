@@ -32,7 +32,7 @@ namespace BTCPayServer.Plugins.Flash
         public override string Identifier => "BTCPayServer.Plugins.Flash";
         public override string Name => "Flash";
         public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
-        public override Version Version => new Version(1, 3, 6);
+        public override Version Version => new Version(1, 4, 0);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
@@ -85,6 +85,20 @@ namespace BTCPayServer.Plugins.Flash
 
                 // Register WebSocket service for real-time updates
                 applicationBuilder.AddScoped<IFlashWebSocketService, FlashWebSocketService>();
+                
+                // Register Boltcard invoice poller for payment detection
+                applicationBuilder.AddScoped<IFlashGraphQLService, FlashGraphQLService>();
+                applicationBuilder.AddScoped<IFlashInvoiceService, FlashInvoiceService>();
+                applicationBuilder.AddScoped<IFlashExchangeRateService, FlashExchangeRateService>();
+                applicationBuilder.AddScoped<IFlashBoltcardService, FlashBoltcardService>();
+                applicationBuilder.AddScoped<IFlashPaymentService>(provider => 
+                    new FlashPaymentService(
+                        provider.GetRequiredService<IFlashGraphQLService>(),
+                        provider.GetRequiredService<IFlashExchangeRateService>(),
+                        provider.GetRequiredService<ILogger<FlashPaymentService>>(),
+                        provider
+                    ));
+                applicationBuilder.AddHostedService<BoltcardInvoicePoller>();
 
                 // Register FlashLightningClient with a factory method that creates it when needed
                 // The factory will use IServiceProvider to get other dependencies like loggers
@@ -166,6 +180,16 @@ namespace BTCPayServer.Plugins.Flash
                 applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
                     provider.GetRequiredService<Models.BoltcardPatch>());
 
+                // 5. Boltcard invoice tracker for payment detection
+                applicationBuilder.AddScoped<Models.BoltcardInvoiceTracker>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.BoltcardInvoiceTracker>();
+                    return new Models.BoltcardInvoiceTracker(logger, provider);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.BoltcardInvoiceTracker>());
+
                 _logger?.LogInformation("Flash Plugin: Registered Pull Payment handlers");
                 FlashPluginLogger.Log("Registered Pull Payment handlers");
 
@@ -187,9 +211,7 @@ namespace BTCPayServer.Plugins.Flash
                 // Log to file system first
                 FlashPluginLogger.Log($"ERROR: {ex.Message}\n{ex.StackTrace}");
 
-                // Log to console 
-                Console.WriteLine($"Flash Plugin ERROR: {ex.Message}");
-                Console.WriteLine($"Flash Plugin ERROR: {ex.StackTrace}");
+                // Use proper logging instead of console output
 
                 // Also try standard Debug output
                 Debug.WriteLine($"Flash Plugin ERROR: {ex.Message}");

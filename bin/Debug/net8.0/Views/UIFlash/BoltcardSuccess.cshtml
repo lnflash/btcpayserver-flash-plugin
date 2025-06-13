@@ -1,0 +1,140 @@
+@{
+    ViewData["Title"] = "Payment Success";
+    Layout = "_Layout";
+    
+    var invoiceId = ViewData["InvoiceId"] as string;
+}
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex align-items-center">
+                <img src="~/img/icons/flash.svg" width="50" height="50" class="me-3" alt="Flash Logo" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' width=\'50\' height=\'50\'><path d=\'M11 21h-1l1-7H7.5c-.58 0-.912-.753-.588-1.266L12.562 3h1l-1 7h3.5c.555 0 .869.73.55 1.221L11 21Z\' fill=\'%23FFD700\'/></svg>'" />
+                <div>
+                    <h1 class="mb-0">Payment Successful!</h1>
+                    <p class="text-muted mb-0">Flash Plugin v@(ViewData["PluginVersion"])</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-8 offset-lg-2">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h2 class="h4 mb-0"><i class="fas fa-check-circle me-2"></i>Boltcard Topup Complete</h2>
+                </div>
+                <div class="card-body text-center">
+                    <div class="my-4">
+                        <div class="success-checkmark">
+                            <div class="check-icon">
+                                <span class="icon-line line-tip"></span>
+                                <span class="icon-line line-long"></span>
+                                <div class="icon-circle"></div>
+                                <div class="icon-fix"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <h3 class="mb-3">Your payment has been processed</h3>
+                    <p class="text-muted mb-4">
+                        Your Boltcard has been topped up successfully.<br>
+                        You can now use your card for Lightning payments.
+                    </p>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span>Transaction ID: <strong>@invoiceId</strong></span>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <a href="/plugins/flash/boltcard" class="btn btn-primary me-2">
+                            <i class="fas fa-redo me-2"></i>Make Another Topup
+                        </a>
+                        <a href="/plugins/flash" class="btn btn-secondary">
+                            <i class="fas fa-home me-2"></i>Back to Dashboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .success-checkmark {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto;
+    }
+    .success-checkmark .check-icon {
+        width: 80px;
+        height: 80px;
+        position: relative;
+        border-radius: 50%;
+        box-sizing: content-box;
+        border: 4px solid #4CAF50;
+    }
+    .success-checkmark .check-icon::before {
+        top: 3px;
+        left: -2px;
+        width: 30px;
+        transform-origin: 100% 50%;
+        border-radius: 100px 0 0 100px;
+    }
+    .success-checkmark .check-icon::after {
+        top: 0;
+        left: 30px;
+        width: 60px;
+        transform-origin: 0 50%;
+        border-radius: 0 100px 100px 0;
+    }
+    .success-checkmark .check-icon::before, .success-checkmark .check-icon::after {
+        content: '';
+        height: 100px;
+        position: absolute;
+        background: #FFFFFF;
+        transform: rotate(-45deg);
+    }
+    .success-checkmark .check-icon .icon-line {
+        height: 5px;
+        background-color: #4CAF50;
+        display: block;
+        border-radius: 2px;
+        position: absolute;
+        z-index: 10;
+    }
+    .success-checkmark .check-icon .icon-line.line-tip {
+        top: 46px;
+        left: 14px;
+        width: 25px;
+        transform: rotate(45deg);
+    }
+    .success-checkmark .check-icon .icon-line.line-long {
+        top: 38px;
+        right: 8px;
+        width: 47px;
+        transform: rotate(-45deg);
+    }
+    .success-checkmark .check-icon .icon-circle {
+        top: -4px;
+        left: -4px;
+        z-index: 10;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        position: absolute;
+        box-sizing: content-box;
+        border: 4px solid rgba(76, 175, 80, .5);
+    }
+    .success-checkmark .check-icon .icon-fix {
+        top: 8px;
+        width: 5px;
+        left: 26px;
+        z-index: 1;
+        height: 85px;
+        position: absolute;
+        transform: rotate(-45deg);
+        background-color: #FFFFFF;
+    }
+</style>

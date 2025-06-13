@@ -24,6 +24,7 @@ namespace BTCPayServer.Plugins.Flash.Services
         private Task? _receiveLoopTask;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1);
         private readonly HashSet<string> _subscribedInvoices = new HashSet<string>();
+        private readonly Dictionary<string, string> _subscriptionToPaymentRequest = new();
         private string? _bearerToken;
         private Uri? _wsEndpoint;
         private readonly Dictionary<string, TaskCompletionSource<bool>> _pendingOperations = new();
@@ -84,7 +85,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                 var ackReceived = await WaitForConnectionAck();
                 if (ackReceived)
                 {
-                    _logger.LogInformation("✅ Successfully connected to Flash WebSocket with protocol: {Protocol}", _webSocket?.SubProtocol ?? "none");
+                    _logger.LogInformation("Successfully connected to Flash WebSocket with protocol: {Protocol}", _webSocket?.SubProtocol ?? "none");
                 }
                 else
                 {
@@ -166,7 +167,7 @@ namespace BTCPayServer.Plugins.Flash.Services
             return completedTask == tcs.Task && await tcs.Task;
         }
 
-        public async Task SubscribeToInvoiceUpdatesAsync(string invoiceId, CancellationToken cancellation = default)
+        public async Task SubscribeToInvoiceUpdatesAsync(string paymentRequest, CancellationToken cancellation = default)
         {
             if (!IsConnected)
             {
@@ -174,13 +175,13 @@ namespace BTCPayServer.Plugins.Flash.Services
                 return;
             }
 
-            if (_subscribedInvoices.Contains(invoiceId))
+            if (_subscribedInvoices.Contains(paymentRequest))
             {
-                _logger.LogDebug("Already subscribed to invoice {InvoiceId}", invoiceId);
+                _logger.LogDebug("Already subscribed to payment request {PaymentRequest}", paymentRequest);
                 return;
             }
 
-            var subscriptionId = $"invoice_{invoiceId}_{++_messageId}";
+            var subscriptionId = $"payment_{++_messageId}";
             
             // Create subscription for lnInvoicePaymentStatus
             var subscribeMessage = new
@@ -202,7 +203,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                     {
                         input = new
                         {
-                            paymentRequest = invoiceId
+                            paymentRequest = paymentRequest
                         }
                     }
                 }
@@ -211,9 +212,12 @@ namespace BTCPayServer.Plugins.Flash.Services
             var messageJson = JsonConvert.SerializeObject(subscribeMessage);
             _logger.LogDebug("Subscribing to invoice updates: {Message}", messageJson);
             await SendMessageAsync(messageJson, cancellation);
-            _subscribedInvoices.Add(invoiceId);
+            
+            // Track the subscription
+            _subscribedInvoices.Add(paymentRequest);
+            _subscriptionToPaymentRequest[subscriptionId] = paymentRequest;
 
-            _logger.LogInformation("Subscribed to updates for invoice {InvoiceId}", invoiceId);
+            _logger.LogInformation("Subscribed to updates for payment request {PaymentRequest} with subscription ID {SubscriptionId}", paymentRequest, subscriptionId);
         }
 
         public async Task UnsubscribeFromInvoiceUpdatesAsync(string invoiceId, CancellationToken cancellation = default)
@@ -411,22 +415,22 @@ namespace BTCPayServer.Plugins.Flash.Services
                 {
                     _logger.LogInformation("Invoice status update received: {Status}", status);
                     
-                    // Extract invoice ID from message ID (format: invoice_{invoiceId}_{messageId})
+                    // Get payment request from subscription mapping
                     var messageId = message["id"]?.ToString();
-                    if (messageId?.StartsWith("invoice_") == true)
+                    if (messageId != null && _subscriptionToPaymentRequest.TryGetValue(messageId, out var paymentRequest))
                     {
-                        var parts = messageId.Split('_');
-                        if (parts.Length >= 2)
+                        _logger.LogInformation("Payment status update for payment request: {PaymentRequest}, Status: {Status}", paymentRequest, status);
+                        
+                        InvoiceUpdated?.Invoke(this, new InvoiceUpdateEventArgs
                         {
-                            var invoiceId = parts[1];
-                            
-                            InvoiceUpdated?.Invoke(this, new InvoiceUpdateEventArgs
-                            {
-                                InvoiceId = invoiceId,
-                                Status = status,
-                                PaidAt = status == "PAID" ? DateTime.UtcNow : null
-                            });
-                        }
+                            InvoiceId = paymentRequest, // This will be the BOLT11 payment request
+                            Status = status,
+                            PaidAt = status == "PAID" ? DateTime.UtcNow : null
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Received payment status update for unknown subscription ID: {MessageId}", messageId);
                     }
                 }
             }
@@ -469,6 +473,7 @@ namespace BTCPayServer.Plugins.Flash.Services
         private async Task CleanupConnection()
         {
             _subscribedInvoices.Clear();
+            _subscriptionToPaymentRequest.Clear();
             _disconnectTokenSource?.Dispose();
             _disconnectTokenSource = null;
             _webSocket?.Dispose();

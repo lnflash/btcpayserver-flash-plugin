@@ -33,7 +33,7 @@ namespace BTCPayServer.Plugins.Flash.Models
             {
                 _logger.LogInformation($"Validating pull payment destination: {destination}");
 
-                var lnurlHelper = new FlashLnurlHelper(_logger);
+                var lnurlHelper = new Models.FlashLnurlHelper(_logger);
 
                 // Check if it's a valid Lightning address or LNURL
                 var (isLnurl, _) = await lnurlHelper.CheckForLnurl(destination, CancellationToken.None);
@@ -77,23 +77,15 @@ namespace BTCPayServer.Plugins.Flash.Models
         private readonly FlashLightningClient _flashClient;
 
         public PullPaymentClaimProcessor(
-            ILogger<PullPaymentClaimProcessor> logger,
-            FlashLightningClient flashClient = null)
+    ILogger<PullPaymentClaimProcessor> logger,
+    FlashLightningClient flashClient = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _flashClient = flashClient;
 
-            if (flashClient == null)
+            if (_flashClient == null)
             {
-                _logger.LogWarning("FlashLightningClient was not provided to PullPaymentClaimProcessor, using fallback implementation");
-                // Create a fallback client for initialization only - not for real use
-                _flashClient = new FlashLightningClient(
-                    "development_token",
-                    new Uri("https://api.flashapp.me/graphql"),
-                    new Microsoft.Extensions.Logging.LoggerFactory().CreateLogger<FlashLightningClient>());
-            }
-            else
-            {
-                _flashClient = flashClient;
+                _logger.LogWarning("FlashLightningClient was not provided to PullPaymentClaimProcessor - Flash payments will not be available until configured");
             }
         }
 
@@ -138,7 +130,7 @@ namespace BTCPayServer.Plugins.Flash.Models
 
                 // Check if it's an LNURL or Lightning address
                 string destinationString = destination.ToString();
-                var lnurlHelper = new FlashLnurlHelper(_logger);
+                var lnurlHelper = new Models.FlashLnurlHelper(_logger);
 
                 var (isLnurl, _) = await lnurlHelper.CheckForLnurl(destinationString, CancellationToken.None);
                 if (isLnurl)
@@ -220,32 +212,20 @@ namespace BTCPayServer.Plugins.Flash.Models
             FlashPullPaymentHandler pullPaymentHandler = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _flashClient = flashClient;
+            _pullPaymentHandler = pullPaymentHandler;
 
-            if (flashClient == null)
+            if (_flashClient == null)
             {
-                _logger.LogWarning("FlashLightningClient was not provided to LnurlWithdrawHandler, using fallback implementation");
-                // Create a fallback client for initialization only - not for real use
-                _flashClient = new FlashLightningClient(
-                    "development_token",
-                    new Uri("https://api.flashapp.me/graphql"),
-                    new Microsoft.Extensions.Logging.LoggerFactory().CreateLogger<FlashLightningClient>());
-            }
-            else
-            {
-                _flashClient = flashClient;
+                _logger.LogWarning("FlashLightningClient was not provided to LnurlWithdrawHandler - Flash LNURL withdrawals will not be available until configured");
             }
 
-            if (pullPaymentHandler == null)
+            if (_pullPaymentHandler == null && _flashClient != null)
             {
-                _logger.LogWarning("FlashPullPaymentHandler was not provided to LnurlWithdrawHandler, creating a default instance");
-                // Create a default handler that uses our client
+                _logger.LogInformation("Creating FlashPullPaymentHandler with provided client");
                 var loggerFactory = new Microsoft.Extensions.Logging.LoggerFactory();
                 var handlerLogger = loggerFactory.CreateLogger<FlashPullPaymentHandler>();
                 _pullPaymentHandler = new FlashPullPaymentHandler(handlerLogger, _flashClient);
-            }
-            else
-            {
-                _pullPaymentHandler = pullPaymentHandler;
             }
         }
 
@@ -256,6 +236,13 @@ namespace BTCPayServer.Plugins.Flash.Models
             try
             {
                 _logger.LogInformation("Processing LNURL withdraw request");
+
+                // Check if we have the required services
+                if (_flashClient == null || _pullPaymentHandler == null)
+                {
+                    _logger.LogWarning("Flash services not available - cannot process LNURL withdraw request");
+                    return args;
+                }
 
                 // Extract arguments using reflection since we don't have direct access to BTCPayServer types
                 if (args == null)

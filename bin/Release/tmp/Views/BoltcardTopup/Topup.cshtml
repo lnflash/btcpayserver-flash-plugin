@@ -1,0 +1,68 @@
+@using BTCPayServer.Plugins.Flash.Models
+@model BoltcardTopupViewModel
+@{
+    ViewData["Title"] = "Boltcard Topup";
+    Layout = "_Layout";
+}
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="mb-0">Boltcard Topup</h3>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                        
+                        <div class="form-group mb-4">
+                            <label asp-for="Amount" class="form-label"></label>
+                            <div class="input-group">
+                                <input asp-for="Amount" class="form-control" type="number" min="500" max="100000" step="100" />
+                                <div class="input-group-append">
+                                    <span class="input-group-text">sats</span>
+                                </div>
+                            </div>
+                            <span asp-validation-for="Amount" class="text-danger"></span>
+                            <div class="form-text text-muted">
+                                Recommended amount: 5,000 - 50,000 satoshis
+                            </div>
+                        </div>
+                        
+                        <div class="form-group mb-4">
+                            <label asp-for="Description" class="form-label"></label>
+                            <input asp-for="Description" class="form-control" value="Flashcard topup" />
+                            <div class="form-text text-muted">
+                                Description will appear in your Flash wallet transaction history
+                            </div>
+                        </div>
+                        
+                        <div class="form-group mt-4 d-grid">
+                            <button type="submit" class="btn btn-primary">Create Invoice</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">Instructions</h4>
+                </div>
+                <div class="card-body">
+                    <ol>
+                        <li>Enter the amount you want to add to your Boltcard</li>
+                        <li>Click "Create Invoice" to generate a Lightning invoice</li>
+                        <li>Scan the QR code with your Flash mobile wallet</li>
+                        <li>Complete the payment within your Flash app</li>
+                        <li>Once payment is confirmed, your Boltcard will be topped up</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
