@@ -13,7 +13,7 @@
   <PropertyGroup>
     <Product>Flash</Product>
     <Description>Flash integration with LNURL and Lightning Address support</Description>
-    <Version>1.3.0</Version>
+    <Version>1.3.6</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <RootNamespace>BTCPayServer.Plugins.Flash</RootNamespace>
   </PropertyGroup>
@@ -36,10 +36,12 @@
     <Content Include="Views/**/*.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="_ViewImports.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
     
     <EmbeddedResource Include="Views/**/*.cshtml" />
     <EmbeddedResource Include="_ViewImports.cshtml" />
     <EmbeddedResource Include="manifest.json" />
+    <EmbeddedResource Include="wwwroot/**/*" />
     
     <None Remove="plugin-manifest.json" />
   </ItemGroup>

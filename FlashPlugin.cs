@@ -5,6 +5,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
+using BTCPayServer.Plugins.Flash.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -30,8 +31,8 @@ namespace BTCPayServer.Plugins.Flash
 
         public override string Identifier => "BTCPayServer.Plugins.Flash";
         public override string Name => "Flash";
-        public override string Description => "Integration with Flash wallet featuring full LNURL and Lightning Address support.";
-        public override Version Version => new Version(1, 3, 0);
+        public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
+        public override Version Version => new Version(1, 3, 6);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
@@ -53,38 +54,58 @@ namespace BTCPayServer.Plugins.Flash
                 _logger?.LogInformation("Flash Plugin: Starting plugin initialization");
                 FlashPluginLogger.Log("Got logger service");
 
-                // Register UI extensions for the Lightning setup section
+                // Simple UI extension for Lightning setup
                 applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Flash/LNPaymentMethodSetupTab");
-                _logger?.LogInformation("Flash Plugin: Registered UI extension");
-                FlashPluginLogger.Log("Registered UI extension");
+
+                // Add a simple navigation item
+                try
+                {
+                    applicationBuilder.AddUIExtension("header-nav", "Flash/BasicNav");
+                }
+                catch (Exception ex)
+                {
+                    FlashPluginLogger.Log($"Error adding header-nav extension: {ex.Message}");
+                    // Fallback to another extension point
+                    try
+                    {
+                        applicationBuilder.AddUIExtension("navbar", "Flash/BasicNav");
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        FlashPluginLogger.Log($"Error adding navbar extension: {fallbackEx.Message}");
+                    }
+                }
+
+                _logger?.LogInformation("Flash Plugin: Registered UI extensions");
+                FlashPluginLogger.Log("Registered UI extensions");
 
                 // Register the Flash Lightning client service
                 applicationBuilder.AddSingleton<FlashLightningConnectionStringHandler>();
                 applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<FlashLightningConnectionStringHandler>());
 
+                // Register WebSocket service for real-time updates
+                applicationBuilder.AddScoped<IFlashWebSocketService, FlashWebSocketService>();
+
                 // Register FlashLightningClient with a factory method that creates it when needed
                 // The factory will use IServiceProvider to get other dependencies like loggers
                 applicationBuilder.AddScoped<FlashLightningClient>(provider =>
                 {
-                    // Get configuration from service or use default values for development
                     var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
                     var logger = loggerFactory.CreateLogger<FlashLightningClient>();
 
                     try
                     {
-                        // Use default values for development/testing only
-                        // In real usage, this client will be created by the connection string handler
-                        var bearerToken = "development_token";
-                        var endpoint = new Uri("https://api.flashapp.me/graphql");
+                        // NOTE: This factory is only used for dependency injection registration
+                        // The actual client instances are created by FlashLightningConnectionStringHandler
+                        // with proper authentication tokens from the connection string
+                        logger.LogWarning("FlashLightningClient factory method called - this should only happen during DI registration");
 
-                        return new FlashLightningClient(
-                            bearerToken,
-                            endpoint,
-                            logger);
+                        // Return null - the actual clients will be created by the connection string handler
+                        return null;
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Error creating FlashLightningClient in factory method");
+                        logger.LogError(ex, "Error in FlashLightningClient factory method");
                         throw;
                     }
                 });
@@ -123,7 +144,7 @@ namespace BTCPayServer.Plugins.Flash
                 applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
                     provider.GetRequiredService<Models.PullPaymentClaimProcessor>());
 
-                // 3. LnurlWithdrawHandler
+                // 3. Regular LnurlWithdrawHandler
                 applicationBuilder.AddScoped<Models.LnurlWithdrawHandler>(provider =>
                 {
                     var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.LnurlWithdrawHandler>();
@@ -135,8 +156,27 @@ namespace BTCPayServer.Plugins.Flash
                 applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
                     provider.GetRequiredService<Models.LnurlWithdrawHandler>());
 
+                // 4. Boltcard patch for amount verification
+                applicationBuilder.AddScoped<Models.BoltcardPatch>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.BoltcardPatch>();
+                    return new Models.BoltcardPatch(logger);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.BoltcardPatch>());
+
                 _logger?.LogInformation("Flash Plugin: Registered Pull Payment handlers");
                 FlashPluginLogger.Log("Registered Pull Payment handlers");
+
+                // Register controllers
+                applicationBuilder.AddScoped<Controllers.BoltcardTopupController>();
+                applicationBuilder.AddScoped<Controllers.FlashMainController>();
+                applicationBuilder.AddScoped<Controllers.UIFlashController>();
+                applicationBuilder.AddScoped<Controllers.FlashRedirectController>();
+                applicationBuilder.AddSingleton<FlashPlugin>(this);
+                _logger?.LogInformation("Flash Plugin: Registered controllers");
+                FlashPluginLogger.Log("Registered controllers");
 
                 base.Execute(applicationBuilder);
                 _logger?.LogInformation("Flash Plugin: Initialization completed successfully");
