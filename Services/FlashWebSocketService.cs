@@ -53,8 +53,14 @@ namespace BTCPayServer.Plugins.Flash.Services
                 _webSocket = new ClientWebSocket();
                 _webSocket.Options.AddSubProtocol("graphql-ws");
                 _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                
+                // Add Authorization header to the WebSocket handshake
+                _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {bearerToken}");
+                
+                // Try different protocols - Flash might use graphql-transport-ws instead
+                _webSocket.Options.AddSubProtocol("graphql-transport-ws");
 
-                _logger.LogInformation("Connecting to Flash WebSocket at {Endpoint} with graphql-ws protocol", websocketEndpoint);
+                _logger.LogInformation("Connecting to Flash WebSocket at {Endpoint} with Authorization header and multiple protocols", websocketEndpoint);
                 await _webSocket.ConnectAsync(websocketEndpoint, cancellation);
                 
                 // Verify connection is established
@@ -78,16 +84,30 @@ namespace BTCPayServer.Plugins.Flash.Services
                 var ackReceived = await WaitForConnectionAck();
                 if (ackReceived)
                 {
-                    _logger.LogInformation("Successfully connected to Flash WebSocket with graphql-ws protocol");
+                    _logger.LogInformation("✅ Successfully connected to Flash WebSocket with protocol: {Protocol}", _webSocket?.SubProtocol ?? "none");
                 }
                 else
                 {
+                    _logger.LogWarning("Did not receive connection acknowledgment from server within timeout");
                     throw new InvalidOperationException("Did not receive connection acknowledgment from server");
                 }
             }
+            catch (System.Net.WebSockets.WebSocketException wsEx) when (wsEx.WebSocketErrorCode == WebSocketError.NotAWebSocket)
+            {
+                _logger.LogInformation("WebSocket endpoint does not support WebSocket protocol. This is normal - Flash may not have WebSocket support enabled.");
+                await CleanupConnection();
+                throw;
+            }
+            catch (System.Net.WebSockets.WebSocketException wsEx) when (wsEx.Message.Contains("503"))
+            {
+                _logger.LogInformation("Flash WebSocket service temporarily unavailable (503). This is normal - using polling instead.");
+                await CleanupConnection();
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to connect to Flash WebSocket");
+                _logger.LogWarning(ex, "Failed to connect to Flash WebSocket: {ErrorType} - {Message}. Falling back to polling.", 
+                    ex.GetType().Name, ex.Message);
                 await CleanupConnection();
                 throw;
             }
@@ -95,18 +115,40 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         private async Task SendConnectionInitMessage(CancellationToken cancellation)
         {
-            var initMessage = new
+            // Check which protocol was actually negotiated
+            var negotiatedProtocol = _webSocket?.SubProtocol;
+            _logger.LogInformation("WebSocket negotiated protocol: {Protocol}", negotiatedProtocol ?? "none");
+            
+            object initMessage;
+            
+            if (negotiatedProtocol == "graphql-transport-ws")
             {
-                id = Guid.NewGuid().ToString(),
-                type = "connection_init",
-                payload = new
+                // New graphql-transport-ws protocol format
+                initMessage = new
                 {
-                    Authorization = $"Bearer {_bearerToken}"
-                }
-            };
+                    type = "connection_init",
+                    payload = new
+                    {
+                        Authorization = $"Bearer {_bearerToken}"
+                    }
+                };
+            }
+            else
+            {
+                // Legacy graphql-ws protocol format
+                initMessage = new
+                {
+                    id = Guid.NewGuid().ToString(),
+                    type = "connection_init",
+                    payload = new
+                    {
+                        Authorization = $"Bearer {_bearerToken}"
+                    }
+                };
+            }
 
             var messageJson = JsonConvert.SerializeObject(initMessage);
-            _logger.LogDebug("Sending connection_init: {Message}", messageJson);
+            _logger.LogInformation("Sending connection_init with protocol {Protocol}: {Message}", negotiatedProtocol, messageJson);
             await SendMessageAsync(messageJson, cancellation);
         }
 
