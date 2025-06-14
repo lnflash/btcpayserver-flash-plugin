@@ -4,6 +4,7 @@ using System.Diagnostics;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.Data;
 using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.Flash.Services;
 using Microsoft.EntityFrameworkCore;
@@ -78,7 +79,7 @@ namespace BTCPayServer.Plugins.Flash
                 }
 
                 // Add store navigation items
-                applicationBuilder.AddUIExtension("store-nav", "Flash/FlashNav");
+                applicationBuilder.AddUIExtension("store-nav", "Shared/Flash/FlashNav");
                 
                 _logger?.LogInformation("Flash Plugin: Registered UI extensions");
                 FlashPluginLogger.Log("Registered UI extensions");
@@ -110,9 +111,19 @@ namespace BTCPayServer.Plugins.Flash
                 // Register payout tracking services and database
                 applicationBuilder.AddDbContext<Data.FlashPluginDbContext>((provider, options) =>
                 {
-                    // BTCPay will configure this with the proper database provider
-                    // For now, use in-memory database for development
-                    options.UseInMemoryDatabase("FlashPlugin");
+                    // Get the database context factory from BTCPay Server
+                    var dbContextFactory = provider.GetService<ApplicationDbContextFactory>();
+                    if (dbContextFactory != null)
+                    {
+                        // Use the same database configuration as BTCPay Server
+                        dbContextFactory.ConfigureBuilder(options);
+                    }
+                    else
+                    {
+                        // Fallback to in-memory database for development/testing
+                        options.UseInMemoryDatabase("FlashPlugin");
+                        _logger?.LogWarning("Using in-memory database for Flash plugin - this is not recommended for production");
+                    }
                 });
                 applicationBuilder.AddScoped<Data.FlashPayoutRepository>();
                 applicationBuilder.AddScoped<IFlashPayoutTrackingService, FlashPayoutTrackingService>();

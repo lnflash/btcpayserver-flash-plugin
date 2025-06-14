@@ -68,7 +68,7 @@ namespace BTCPayServer.Plugins.Flash.Controllers
                 Network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC")
             };
 
-            return View("~/Plugins/Flash/Views/PayoutDashboard.cshtml", viewModel);
+            return View("PayoutDashboard", viewModel);
         }
 
         [HttpGet("list")]

@@ -71,3 +71,4 @@
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.EntityFrameworkCore.Abstractions.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.EntityFrameworkCore.InMemory.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.Caching.Memory.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Views/_ViewImports.cshtml
