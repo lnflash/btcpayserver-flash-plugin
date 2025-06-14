@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Flash integration with LNURL and Lightning Address support")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.4.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.4.2+5ad383af836610941519849caea8c69cfe8bc1d8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.4.2+aba41d89424bfe424fc72b834c929b5892267b85")]
 [assembly: System.Reflection.AssemblyProductAttribute("Flash")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BTCPayServer.Plugins.Flash")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.4.2.0")]

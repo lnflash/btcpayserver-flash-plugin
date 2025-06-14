@@ -60,6 +60,10 @@
               "target": "Package",
               "version": "[0.0.36, )"
             },
+            "Microsoft.EntityFrameworkCore.InMemory": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Microsoft.Extensions.Http.Polly": {
               "target": "Package",
               "version": "[8.0.0, )"

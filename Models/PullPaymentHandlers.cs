@@ -75,13 +75,16 @@ namespace BTCPayServer.Plugins.Flash.Models
     {
         private readonly ILogger<PullPaymentClaimProcessor> _logger;
         private readonly FlashLightningClient _flashClient;
+        private readonly IServiceProvider _serviceProvider;
 
         public PullPaymentClaimProcessor(
     ILogger<PullPaymentClaimProcessor> logger,
-    FlashLightningClient flashClient = null)
+    FlashLightningClient flashClient = null,
+    IServiceProvider serviceProvider = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _flashClient = flashClient;
+            _serviceProvider = serviceProvider;
 
             if (_flashClient == null)
             {

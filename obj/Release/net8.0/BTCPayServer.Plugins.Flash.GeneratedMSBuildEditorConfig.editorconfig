@@ -38,6 +38,10 @@ build_metadata.AdditionalFiles.CssScope =
 build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvTE5QYXltZW50TWV0aG9kU2V0dXBUYWIuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
 
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/PayoutDashboard.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvUGF5b3V0RGFzaGJvYXJkLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
 [/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Flash/Settings.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2gvU2V0dGluZ3MuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
@@ -52,6 +56,10 @@ build_metadata.AdditionalFiles.CssScope =
 
 [/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Shared/Flash/BasicNav.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3MvU2hhcmVkL0ZsYXNoL0Jhc2ljTmF2LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Shared/Flash/FlashNav.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvU2hhcmVkL0ZsYXNoL0ZsYXNoTmF2LmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 
 
 [/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/Shared/Flash/FlashNodeInfo.cshtml]

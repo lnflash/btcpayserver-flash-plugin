@@ -65,3 +65,9 @@
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Polly.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Polly.Core.dll
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Polly.Extensions.Http.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Views/Flash/PayoutDashboard.cshtml
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Views/Shared/Flash/FlashNav.cshtml
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Microsoft.EntityFrameworkCore.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Microsoft.EntityFrameworkCore.Abstractions.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Microsoft.EntityFrameworkCore.InMemory.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Debug/net8.0/Microsoft.Extensions.Caching.Memory.dll

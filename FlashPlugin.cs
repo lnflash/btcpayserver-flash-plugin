@@ -6,6 +6,7 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.Flash.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -76,6 +77,9 @@ namespace BTCPayServer.Plugins.Flash
                     }
                 }
 
+                // Add store navigation items
+                applicationBuilder.AddUIExtension("store-nav", "Flash/FlashNav");
+                
                 _logger?.LogInformation("Flash Plugin: Registered UI extensions");
                 FlashPluginLogger.Log("Registered UI extensions");
 
@@ -102,6 +106,17 @@ namespace BTCPayServer.Plugins.Flash
                         provider
                     ));
                 applicationBuilder.AddHostedService<BoltcardInvoicePoller>();
+                
+                // Register payout tracking services and database
+                applicationBuilder.AddDbContext<Data.FlashPluginDbContext>((provider, options) =>
+                {
+                    // BTCPay will configure this with the proper database provider
+                    // For now, use in-memory database for development
+                    options.UseInMemoryDatabase("FlashPlugin");
+                });
+                applicationBuilder.AddScoped<Data.FlashPayoutRepository>();
+                applicationBuilder.AddScoped<IFlashPayoutTrackingService, FlashPayoutTrackingService>();
+                applicationBuilder.AddHostedService<Data.FlashPluginMigrationRunner>();
 
                 // Register FlashLightningClient with a factory method that creates it when needed
                 // The factory will use IServiceProvider to get other dependencies like loggers
@@ -155,7 +170,7 @@ namespace BTCPayServer.Plugins.Flash
                 {
                     var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.PullPaymentClaimProcessor>();
                     var flashClient = provider.GetService<FlashLightningClient>();
-                    return new Models.PullPaymentClaimProcessor(logger, flashClient);
+                    return new Models.PullPaymentClaimProcessor(logger, flashClient, provider);
                 });
 
                 applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
@@ -192,6 +207,15 @@ namespace BTCPayServer.Plugins.Flash
 
                 applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
                     provider.GetRequiredService<Models.BoltcardInvoiceTracker>());
+                    
+                // 6. Payout event listeners for tracking
+                applicationBuilder.AddScoped<Models.PayoutEventListener>();
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PayoutEventListener>());
+                    
+                applicationBuilder.AddScoped<Models.PayoutStateChangeListener>();
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PayoutStateChangeListener>());
 
                 _logger?.LogInformation("Flash Plugin: Registered Pull Payment handlers");
                 FlashPluginLogger.Log("Registered Pull Payment handlers");
@@ -201,6 +225,7 @@ namespace BTCPayServer.Plugins.Flash
                 applicationBuilder.AddScoped<Controllers.FlashMainController>();
                 applicationBuilder.AddScoped<Controllers.UIFlashController>();
                 applicationBuilder.AddScoped<Controllers.FlashRedirectController>();
+                applicationBuilder.AddScoped<Controllers.FlashPayoutController>();
                 applicationBuilder.AddSingleton<FlashPlugin>(this);
                 _logger?.LogInformation("Flash Plugin: Registered controllers");
                 FlashPluginLogger.Log("Registered controllers");
