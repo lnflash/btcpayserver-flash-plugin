@@ -52,8 +52,9 @@ namespace BTCPayServer.Plugins.Flash.Controllers
             var settings = await GetSettings(storeId);
             ViewData["IsConfigured"] = settings.IsConfigured;
             ViewData["PluginVersion"] = _plugin.Version.ToString();
+            ViewData["StoreId"] = storeId;
 
-            return View(storeId);
+            return View("Dashboard", storeId);
         }
 
         [HttpGet("settings")]
