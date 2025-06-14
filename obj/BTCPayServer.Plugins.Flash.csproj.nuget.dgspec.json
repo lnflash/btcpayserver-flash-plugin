@@ -5,7 +5,7 @@
   },
   "projects": {
     "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/BTCPayServer.Plugins.Flash.csproj": {
-      "version": "1.4.0",
+      "version": "1.4.2",
       "restore": {
         "projectUniqueName": "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/BTCPayServer.Plugins.Flash.csproj",
         "projectName": "BTCPayServer.Plugins.Flash",
@@ -59,6 +59,14 @@
             "LNURL": {
               "target": "Package",
               "version": "[0.0.36, )"
+            },
+            "Microsoft.Extensions.Http.Polly": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Polly": {
+              "target": "Package",
+              "version": "[8.2.0, )"
             }
           },
           "imports": [

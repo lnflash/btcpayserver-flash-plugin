@@ -32,6 +32,11 @@ namespace BTCPayServer.Plugins.Flash.Services
         event EventHandler<InvoiceUpdateEventArgs> InvoiceUpdated;
 
         /// <summary>
+        /// Event raised when a payment is received
+        /// </summary>
+        event EventHandler<PaymentReceivedEventArgs> PaymentReceived;
+
+        /// <summary>
         /// Subscribe to real-time updates for a specific invoice payment request
         /// </summary>
         Task SubscribeToInvoiceUpdatesAsync(string paymentRequest, CancellationToken cancellation = default);
@@ -66,6 +71,37 @@ namespace BTCPayServer.Plugins.Flash.Services
         /// The transaction hash (if available)
         /// </summary>
         public string? TransactionHash { get; set; }
+
+        /// <summary>
+        /// Raw data from the WebSocket update
+        /// </summary>
+        public JObject? RawData { get; set; }
+    }
+
+    /// <summary>
+    /// Event arguments for payment received notifications
+    /// </summary>
+    public class PaymentReceivedEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The payment hash of the received payment
+        /// </summary>
+        public string PaymentHash { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The amount received in satoshis
+        /// </summary>
+        public long AmountSats { get; set; }
+
+        /// <summary>
+        /// The transaction ID if available
+        /// </summary>
+        public string? TransactionId { get; set; }
+
+        /// <summary>
+        /// When the payment was received
+        /// </summary>
+        public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
         /// Raw data from the WebSocket update

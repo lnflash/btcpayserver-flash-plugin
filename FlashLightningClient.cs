@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -52,6 +53,9 @@ namespace BTCPayServer.Plugins.Flash
         private readonly IFlashPaymentService _paymentService;
         private readonly IFlashBoltcardService _boltcardService;
         private readonly IFlashWebSocketService? _webSocketService;
+        private readonly IFlashTransactionService _transactionService;
+        private readonly IFlashWalletService _walletService;
+        private readonly IFlashMonitoringService _monitoringService;
 
         // Add a cache of invoices we've created but might not yet be visible in the API
         // Shared static tracking for invoice monitoring across all instances
@@ -106,6 +110,22 @@ namespace BTCPayServer.Plugins.Flash
         private static readonly Dictionary<string, string> _transactionSequences = new Dictionary<string, string>();
         private static long _sequenceCounter = 0;
         private static readonly object _sequenceLock = new object();
+
+        // Static collection to track recently paid invoices across all instances
+        private static readonly ConcurrentDictionary<string, RecentlyPaidInvoice> _recentlyPaidInvoices = new ConcurrentDictionary<string, RecentlyPaidInvoice>();
+        private static readonly object _recentlyPaidLock = new object();
+        private static readonly TimeSpan _recentlyPaidExpiration = TimeSpan.FromMinutes(5); // Keep for 5 minutes
+
+        // Class to store recently paid invoice details
+        public class RecentlyPaidInvoice
+        {
+            public string InvoiceId { get; set; } = string.Empty;
+            public string PaymentHash { get; set; } = string.Empty;
+            public long AmountSats { get; set; }
+            public DateTime PaidAt { get; set; }
+            public string? Bolt11 { get; set; }
+            public string? TransactionId { get; set; }
+        }
 
         // NOTE: Invoice listener is now managed by FlashInvoiceService to maintain proper separation of concerns
 
@@ -178,11 +198,20 @@ namespace BTCPayServer.Plugins.Flash
             var invoiceLogger = loggerFactory.CreateLogger<FlashInvoiceService>();
             _invoiceService = new FlashInvoiceService(_graphQLService, _exchangeRateService, _boltcardService, invoiceLogger);
             
+            var transactionLogger = loggerFactory.CreateLogger<FlashTransactionService>();
+            _transactionService = new FlashTransactionService(_graphQLService, _boltcardService, transactionLogger);
+            
+            var walletLogger = loggerFactory.CreateLogger<FlashWalletService>();
+            _walletService = new FlashWalletService(_graphQLService, walletLogger);
+            
             var paymentLogger = loggerFactory.CreateLogger<FlashPaymentService>();
             _paymentService = new FlashPaymentService(_graphQLService, _exchangeRateService, paymentLogger);
             
             var webSocketLogger = loggerFactory.CreateLogger<FlashWebSocketService>();
             _webSocketService = new FlashWebSocketService(webSocketLogger);
+            
+            var monitoringLogger = loggerFactory.CreateLogger<FlashMonitoringService>();
+            _monitoringService = new FlashMonitoringService(_invoiceService, _transactionService, _boltcardService, _webSocketService, monitoringLogger);
 
             // Try to establish WebSocket connection for real-time updates
             if (_webSocketService != null)
@@ -194,17 +223,29 @@ namespace BTCPayServer.Plugins.Flash
                         // Build WebSocket endpoint based on API endpoint
                         var wsEndpointBuilder = new UriBuilder(endpoint);
                         
-                        // If using test API, use test WebSocket
-                        if (endpoint.Host.Contains("test", StringComparison.OrdinalIgnoreCase))
+                        // Derive WebSocket host from API host
+                        var apiHost = endpoint.Host;
+                        string wsHost;
+                        
+                        // Transform api.domain.com to ws.domain.com
+                        if (apiHost.StartsWith("api.", StringComparison.OrdinalIgnoreCase))
                         {
-                            wsEndpointBuilder.Host = "ws.test.flashapp.me";
+                            wsHost = "ws" + apiHost.Substring(3); // Replace "api" with "ws"
+                        }
+                        else if (apiHost.Contains("localhost", StringComparison.OrdinalIgnoreCase) || 
+                                 System.Net.IPAddress.TryParse(apiHost, out _))
+                        {
+                            // For localhost or IP addresses, keep the same host
+                            wsHost = apiHost;
                         }
                         else
                         {
-                            wsEndpointBuilder.Host = "ws.flashapp.me";
+                            // For other domains, prepend "ws." subdomain
+                            wsHost = "ws." + apiHost;
                         }
                         
-                        wsEndpointBuilder.Scheme = "wss";
+                        wsEndpointBuilder.Host = wsHost;
+                        wsEndpointBuilder.Scheme = endpoint.Scheme == "https" ? "wss" : "ws";
                         wsEndpointBuilder.Path = "/graphql";
                         
                         var wsEndpoint = wsEndpointBuilder.Uri;
@@ -239,6 +280,67 @@ namespace BTCPayServer.Plugins.Flash
 
             // Initialize wallet ID on construction
             InitializeWalletIdAsync().Wait();
+        }
+
+        // Static method to register a recently paid invoice
+        public static void RegisterRecentlyPaidInvoice(string invoiceId, string paymentHash, long amountSats, string? bolt11 = null, string? transactionId = null)
+        {
+            var paidInvoice = new RecentlyPaidInvoice
+            {
+                InvoiceId = invoiceId,
+                PaymentHash = paymentHash,
+                AmountSats = amountSats,
+                PaidAt = DateTime.UtcNow,
+                Bolt11 = bolt11,
+                TransactionId = transactionId
+            };
+
+            // Add or update the invoice in the collection
+            _recentlyPaidInvoices[invoiceId] = paidInvoice;
+            
+            // Also add by payment hash for quick lookup
+            if (!string.IsNullOrEmpty(paymentHash))
+            {
+                _recentlyPaidInvoices[paymentHash] = paidInvoice;
+            }
+
+            // Clean up old entries
+            CleanupExpiredRecentlyPaidInvoices();
+        }
+
+        // Static method to check if an invoice was recently paid
+        public static RecentlyPaidInvoice? GetRecentlyPaidInvoice(string invoiceIdOrPaymentHash)
+        {
+            if (string.IsNullOrEmpty(invoiceIdOrPaymentHash))
+                return null;
+
+            // Clean up expired entries first
+            CleanupExpiredRecentlyPaidInvoices();
+
+            if (_recentlyPaidInvoices.TryGetValue(invoiceIdOrPaymentHash, out var invoice))
+            {
+                // Check if still valid
+                if (DateTime.UtcNow - invoice.PaidAt < _recentlyPaidExpiration)
+                {
+                    return invoice;
+                }
+            }
+
+            return null;
+        }
+
+        // Static method to clean up expired entries
+        private static void CleanupExpiredRecentlyPaidInvoices()
+        {
+            var expiredKeys = _recentlyPaidInvoices
+                .Where(kvp => DateTime.UtcNow - kvp.Value.PaidAt > _recentlyPaidExpiration)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expiredKeys)
+            {
+                _recentlyPaidInvoices.TryRemove(key, out _);
+            }
         }
 
         private async Task InitializeWalletIdAsync()
@@ -618,9 +720,32 @@ namespace BTCPayServer.Plugins.Flash
 
                     _logger.LogInformation($"[PAYMENT DEBUG] Using amount for no-amount invoice: {amountToUse.Value} satoshis");
 
-                    // Convert from satoshis to USD cents using current exchange rate
+                    // BTCPayServer always sends amounts in satoshis, but Flash USD wallets need cents
+                    // We need to convert satoshis to USD cents for all payments
                     decimal usdCentsAmount = await ConvertSatoshisToUsdCents(amountToUse.Value, cancellation);
                     _logger.LogInformation($"[PAYMENT DEBUG] Converted {amountToUse.Value} satoshis to {usdCentsAmount} USD cents using current exchange rate");
+                    
+                    // Validate minimum amount for Flash (1 cent USD)
+                    if (usdCentsAmount < 1)
+                    {
+                        _logger.LogError($"[PAYMENT DEBUG] Amount {usdCentsAmount} cents is below Flash's minimum of 1 cent USD");
+                        
+                        // For pull payments, provide a more helpful error message
+                        bool isPullPayment = memo?.Contains("Pull Payment") == true || 
+                                           memo?.Contains("Payout") == true ||
+                                           _pullPaymentInvoices.ContainsValue(bolt11);
+                        
+                        if (isPullPayment)
+                        {
+                            decimal minSatoshis = await ConvertUsdCentsToSatoshis(1, cancellation);
+                            return new PayResponse(PayResult.Error, 
+                                $"Pull payment amount is below Flash's minimum requirement of 1 cent USD (approximately {minSatoshis} satoshis at current exchange rate). " +
+                                $"Requested: {amountToUse.Value} satoshis ({usdCentsAmount:F2} cents)");
+                        }
+                        
+                        return new PayResponse(PayResult.Error, 
+                            $"Amount is below Flash's minimum requirement of 1 cent USD. Requested: {amountToUse.Value} satoshis ({usdCentsAmount:F2} cents)");
+                    }
 
                     mutation = new GraphQLRequest
                     {
@@ -1341,6 +1466,26 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
+                // First check if this invoice was recently paid
+                var recentlyPaid = GetRecentlyPaidInvoice(invoiceId);
+                if (recentlyPaid != null)
+                {
+                    _logger.LogInformation($"[GetInvoice] Found recently paid invoice {invoiceId} in cache, returning as paid");
+                    
+                    // Return the invoice as paid immediately
+                    return new LightningInvoice
+                    {
+                        Id = recentlyPaid.InvoiceId,
+                        PaymentHash = recentlyPaid.PaymentHash,
+                        Status = LightningInvoiceStatus.Paid,
+                        Amount = LightMoney.Satoshis(recentlyPaid.AmountSats),
+                        AmountReceived = LightMoney.Satoshis(recentlyPaid.AmountSats),
+                        BOLT11 = recentlyPaid.Bolt11,
+                        PaidAt = recentlyPaid.PaidAt,
+                        ExpiresAt = recentlyPaid.PaidAt.AddHours(1) // Set a reasonable expiry
+                    };
+                }
+
                 // Delegate to the invoice service
                 var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
                 
@@ -1643,6 +1788,27 @@ namespace BTCPayServer.Plugins.Flash
 
         public async Task<LightningInvoice> GetInvoice(uint256 invoiceId, CancellationToken cancellation = default)
         {
+            // First check if this invoice was recently paid
+            var invoiceIdStr = invoiceId.ToString();
+            var recentlyPaid = GetRecentlyPaidInvoice(invoiceIdStr);
+            if (recentlyPaid != null)
+            {
+                _logger.LogInformation($"[GetInvoice] Found recently paid invoice {invoiceIdStr} in cache, returning as paid");
+                
+                // Return the invoice as paid immediately
+                return new LightningInvoice
+                {
+                    Id = recentlyPaid.InvoiceId,
+                    PaymentHash = recentlyPaid.PaymentHash,
+                    Status = LightningInvoiceStatus.Paid,
+                    Amount = LightMoney.Satoshis(recentlyPaid.AmountSats),
+                    AmountReceived = LightMoney.Satoshis(recentlyPaid.AmountSats),
+                    BOLT11 = recentlyPaid.Bolt11,
+                    PaidAt = recentlyPaid.PaidAt,
+                    ExpiresAt = recentlyPaid.PaidAt.AddHours(1) // Set a reasonable expiry
+                };
+            }
+
             // Delegate to the invoice service
             var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
             
@@ -1710,34 +1876,27 @@ namespace BTCPayServer.Plugins.Flash
             throw new NotImplementedException("Node connection is not supported by Flash API");
         }
 
-        public Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
+        public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
         {
-            // Create implementation that uses WebSocket if available, otherwise polls
-            var usingWebSocket = _webSocketService?.IsConnected ?? false;
-            _logger.LogInformation($"Flash plugin setting up invoice monitoring with {(usingWebSocket ? "WebSocket real-time updates" : "polling")}");
-
             try
             {
-                // Create a channel for the invoices
-                var channel = System.Threading.Channels.Channel.CreateUnbounded<LightningInvoice>();
+                // Start the monitoring service
+                await _monitoringService.StartMonitoringAsync(cancellation);
+                
+                var usingWebSocket = _webSocketService?.IsConnected ?? false;
+                _logger.LogInformation($"Flash plugin setting up invoice monitoring with {(usingWebSocket ? "WebSocket real-time updates" : "polling")}");
 
-                // Store channel reference globally so both WebSocket and polling can notify BTCPay Server
-                _currentInvoiceListener = channel;
-                FlashInvoiceService.SetInvoiceListener(channel);
-                _logger.LogInformation("[INVOICE LISTENER] Invoice listener channel stored - notifications will be sent to BTCPay Server");
+                // The monitoring service handles invoice notifications internally
+                _logger.LogInformation("[INVOICE LISTENER] Monitoring service started - notifications will be sent to BTCPay Server");
 
-                // Create and return the listener with WebSocket support indicator
-                return Task.FromResult<ILightningInvoiceListener>(
-                    new FlashLightningInvoiceListener(channel, _logger, _invoiceService, usingWebSocket));
+                // Create and return the listener that uses the monitoring service
+                return new FlashLightningInvoiceListener(_monitoringService, _logger);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error setting up Flash invoice listener");
-                // Fallback to dummy listener
-                var channel = System.Threading.Channels.Channel.CreateUnbounded<LightningInvoice>();
-                channel.Writer.TryComplete();
-                return Task.FromResult<ILightningInvoiceListener>(
-                    new FlashLightningInvoiceListener(channel, _logger, null, false));
+                // Return a dummy listener on error
+                return new FlashLightningInvoiceListener(null, _logger);
             }
         }
 
@@ -1760,268 +1919,56 @@ namespace BTCPayServer.Plugins.Flash
             }
         }
 
-        // Simplified implementation of ILightningInvoiceListener for Flash with polling
+        // Simplified implementation of ILightningInvoiceListener for Flash using monitoring service
         private class FlashLightningInvoiceListener : ILightningInvoiceListener
         {
-            private readonly System.Threading.Channels.Channel<LightningInvoice> _channel;
-            private readonly System.Threading.Channels.ChannelReader<LightningInvoice> _reader;
+            private readonly IFlashMonitoringService? _monitoringService;
             private readonly ILogger _logger;
-            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-            private readonly IFlashInvoiceService? _invoiceService;
-            private readonly Task? _pollingTask;
-            private readonly bool _usingWebSocket;
 
             public FlashLightningInvoiceListener(
-                System.Threading.Channels.Channel<LightningInvoice> channel,
-                ILogger logger,
-                IFlashInvoiceService? invoiceService,
-                bool usingWebSocket)
+                IFlashMonitoringService? monitoringService,
+                ILogger logger)
             {
-                _channel = channel;
-                _reader = channel.Reader;
+                _monitoringService = monitoringService;
                 _logger = logger;
-                _invoiceService = invoiceService;
-                _usingWebSocket = usingWebSocket;
-
-                // Start polling task only if we're not using WebSocket and have an invoice service
-                if (!_usingWebSocket && _invoiceService != null)
-                {
-                    _logger.LogInformation("Starting invoice polling task (WebSocket not available)");
-                    _pollingTask = Task.Run(PollInvoices);
-                }
-                else if (_usingWebSocket)
-                {
-                    _logger.LogInformation("Using WebSocket for real-time invoice updates");
-                }
-                else
-                {
-                    _logger.LogWarning("Missing required components for invoice monitoring");
-                }
-            }
-
-            private async Task PollInvoices()
-            {
-                try
-                {
-                    _logger.LogInformation("[INVOICE DEBUG] Invoice polling task started");
-
-                    // Dictionary to keep track of monitored invoices and their status
-                    Dictionary<string, LightningInvoiceStatus> monitoredInvoices = new Dictionary<string, LightningInvoiceStatus>();
-
-                    // Keep polling until cancellation is requested
-                    while (!_cts.IsCancellationRequested)
-                    {
-                        // Sleep before polling to avoid high CPU usage
-                        await Task.Delay(5000, _cts.Token);
-
-                        try
-                        {
-                            // Check the invoices we're tracking with thread safety
-                            if (_invoiceService != null)
-                            {
-                                // Get pending invoices from the service
-                                var pendingInvoices = FlashInvoiceService.GetPendingInvoices();
-                                var pendingInvoicesToCheck = pendingInvoices.Keys.ToList();
-                                var totalCount = pendingInvoices.Count;
-
-                                _logger.LogInformation($"[INVOICE DEBUG] Checking {pendingInvoicesToCheck.Count} pending invoices for payment updates");
-                                _logger.LogInformation($"[INVOICE DEBUG] Total pending invoices in dictionary: {totalCount}");
-
-                                if (pendingInvoicesToCheck.Count > 0)
-                                {
-                                    var invoiceIds = string.Join(", ", pendingInvoicesToCheck);
-                                    _logger.LogInformation($"[INVOICE DEBUG] Pending invoice IDs: {invoiceIds}");
-                                }
-                                else
-                                {
-                                    _logger.LogWarning($"[INVOICE DEBUG] No pending invoices found in polling task. Dictionary count: {totalCount}");
-                                }
-
-                                foreach (var invoiceId in pendingInvoicesToCheck)
-                                {
-                                    try
-                                    {
-                                        // Get the current status from our cache
-                                        if (!pendingInvoices.TryGetValue(invoiceId, out var pendingInvoice))
-                                        {
-                                            _logger.LogWarning($"[INVOICE DEBUG] Invoice {invoiceId} no longer in pending invoices");
-                                            continue; // Skip this invoice
-                                        }
-                                        var oldStatus = pendingInvoice.Status;
-
-                                        _logger.LogInformation($"[INVOICE DEBUG] Checking invoice {invoiceId} - Current status: {oldStatus}");
-
-                                        // Try to get an updated status
-                                        var updatedInvoice = await _invoiceService.GetInvoiceAsync(invoiceId, _cts.Token);
-
-                                        _logger.LogInformation($"[INVOICE DEBUG] Got updated status for invoice {invoiceId}: {updatedInvoice.Status} (was {oldStatus})");
-
-                                        // If status changed to paid, notify
-                                        if (updatedInvoice.Status == LightningInvoiceStatus.Paid &&
-                                            oldStatus != LightningInvoiceStatus.Paid)
-                                        {
-                                            _logger.LogInformation($"[INVOICE DEBUG] Detected payment for invoice {invoiceId}");
-
-                                            // Make sure AmountReceived is set correctly
-                                            if (updatedInvoice.AmountReceived == null || updatedInvoice.AmountReceived.MilliSatoshi == 0)
-                                            {
-                                                _logger.LogInformation($"[INVOICE DEBUG] Setting AmountReceived = Amount for invoice {invoiceId}");
-                                                updatedInvoice.AmountReceived = updatedInvoice.Amount;
-                                            }
-
-                                            // Add to monitored invoices so we don't check it multiple times
-                                            monitoredInvoices[invoiceId] = updatedInvoice.Status;
-
-                                            // Notify about the payment
-                                            _logger.LogInformation($"[INVOICE DEBUG] Writing paid invoice {invoiceId} to notification channel");
-                                            bool written = false;
-
-                                            try
-                                            {
-                                                written = _channel.Writer.TryWrite(updatedInvoice);
-                                            }
-                                            catch (Exception ex)
-                                            {
-                                                _logger.LogError(ex, $"[INVOICE DEBUG] Error writing to channel: {ex.Message}");
-                                            }
-
-                                            if (!written)
-                                            {
-                                                _logger.LogWarning($"[INVOICE DEBUG] Failed to write invoice {invoiceId} to channel");
-                                            }
-                                            else
-                                            {
-                                                _logger.LogInformation($"[INVOICE DEBUG] Successfully wrote paid invoice to channel: ID={invoiceId}, " +
-                                                    $"Status={updatedInvoice.Status}, Amount={updatedInvoice.Amount}, " +
-                                                    $"AmountReceived={updatedInvoice.AmountReceived}, PaymentHash={updatedInvoice.PaymentHash}");
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogError(ex, $"[INVOICE DEBUG] Error checking pending invoice {invoiceId}");
-                                    }
-                                }
-                            }
-
-                            _logger.LogDebug($"[INVOICE DEBUG] Invoice polling cycle completed - monitoring {monitoredInvoices.Count} invoices");
-
-                            // For testing purposes, create a test invoice that gets paid after a few seconds if none are being monitored
-                            int pendingInvoicesCount = 0;
-                            if (_invoiceService != null)
-                            {
-                                pendingInvoicesCount = FlashInvoiceService.GetPendingInvoices().Count;
-                            }
-
-                            if (monitoredInvoices.Count == 0 && _invoiceService != null && pendingInvoicesCount == 0)
-                            {
-                                // Only create test invoices every 30 seconds
-                                if (DateTime.Now.Second % 30 == 0)
-                                {
-                                    string testInvoiceId = "test_" + DateTime.UtcNow.Ticks;
-                                    monitoredInvoices[testInvoiceId] = LightningInvoiceStatus.Unpaid;
-                                    _logger.LogInformation($"[INVOICE DEBUG] Added test invoice {testInvoiceId} to monitoring");
-
-                                    // Simulate a payment after 10 seconds
-                                    _ = Task.Run(async () =>
-                                    {
-                                        await Task.Delay(10000);
-                                        if (!_cts.IsCancellationRequested)
-                                        {
-                                            var invoice = new LightningInvoice
-                                            {
-                                                Id = testInvoiceId,
-                                                PaymentHash = testInvoiceId,
-                                                Status = LightningInvoiceStatus.Paid,
-                                                BOLT11 = "lnbc...",
-                                                Amount = LightMoney.Satoshis(1000),
-                                                AmountReceived = LightMoney.Satoshis(1000),
-                                                ExpiresAt = DateTime.UtcNow.AddHours(24)
-                                            };
-
-                                            _logger.LogInformation($"[INVOICE DEBUG] Test invoice {testInvoiceId} paid");
-
-                                            // Write to the channel
-                                            if (!_channel.Writer.TryWrite(invoice))
-                                            {
-                                                _logger.LogWarning($"[INVOICE DEBUG] Could not write test invoice {testInvoiceId} to channel");
-                                            }
-                                            else
-                                            {
-                                                _logger.LogInformation($"[INVOICE DEBUG] Successfully wrote test invoice to channel: ID={testInvoiceId}, " +
-                                                    $"Status={invoice.Status}, Amount={invoice.Amount}, " +
-                                                    $"AmountReceived={invoice.AmountReceived}, PaymentHash={invoice.PaymentHash}");
-                                            }
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "[INVOICE DEBUG] Error polling for invoice status");
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogInformation("[INVOICE DEBUG] Invoice polling task cancelled");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[INVOICE DEBUG] Fatal error in invoice polling task");
-                }
             }
 
             public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
             {
+                if (_monitoringService == null)
+                {
+                    throw new NotSupportedException("Monitoring service not available");
+                }
+
                 try
                 {
-                    _logger.LogInformation("[INVOICE DEBUG] WaitInvoice called - waiting for invoice payment notifications");
+                    // Use the monitoring service to wait for paid invoices
+                    return await _monitoringService.WaitInvoiceAsync(cancellation);
 
-                    // Try to read an invoice from the channel
-                    var invoice = await _reader.ReadAsync(cancellation);
-
-                    // Ensure the invoice has all the required properties set
-                    if (invoice.Status == LightningInvoiceStatus.Paid)
-                    {
-                        if (invoice.AmountReceived == null || invoice.AmountReceived.MilliSatoshi == 0)
-                        {
-                            _logger.LogInformation($"[INVOICE DEBUG] Invoice {invoice.Id} is marked as Paid but AmountReceived is not set, using Amount");
-                            invoice.AmountReceived = invoice.Amount;
-                        }
-
-                        if (string.IsNullOrEmpty(invoice.PaymentHash))
-                        {
-                            invoice.PaymentHash = invoice.Id;
-                            _logger.LogInformation($"[INVOICE DEBUG] Setting PaymentHash = Id for invoice {invoice.Id}");
-                        }
-                    }
-
-                    _logger.LogInformation($"[INVOICE DEBUG] Returning paid invoice from WaitInvoice: ID={invoice.Id}, Status={invoice.Status}, " +
-                        $"Amount={invoice.Amount}, AmountReceived={invoice.AmountReceived}, PaymentHash={invoice.PaymentHash}");
-
-                    return invoice;
                 }
-                catch (OperationCanceledException ex)
+                catch (OperationCanceledException)
                 {
-                    _logger.LogInformation($"[INVOICE DEBUG] WaitInvoice was cancelled: {ex.Message}");
+                    _logger.LogInformation("WaitInvoice cancelled");
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "[INVOICE DEBUG] Error in WaitInvoice method");
-                    throw new NotSupportedException("[INVOICE DEBUG] Error monitoring invoices: " + ex.Message);
+                    _logger.LogError(ex, "Error in WaitInvoice");
+                    throw;
                 }
             }
 
             public void Dispose()
             {
-                _cts.Cancel();
-                _cts.Dispose();
-                _channel.Writer.TryComplete();
+                // Stop monitoring when disposed
+                if (_monitoringService != null && _monitoringService.IsMonitoring)
+                {
+                    _monitoringService.StopMonitoringAsync().GetAwaiter().GetResult();
+                }
             }
         }
+
+        // Remove old polling code - now handled by FlashMonitoringService
 
         private class TransactionByHashResponse
         {
@@ -2817,143 +2764,20 @@ namespace BTCPayServer.Plugins.Flash
             {
                 _logger.LogInformation($"[BOLTCARD DEBUG] Starting enhanced tracking for {paymentHash}, amount: {amountSats} sats, card: {boltcardId}");
 
-                // Poll more frequently for small Boltcard amounts
-                var maxWaitTime = TimeSpan.FromMinutes(2); // Shorter timeout for Boltcards
-                var pollInterval = TimeSpan.FromSeconds(5); // More frequent polling
-                var startTime = DateTime.UtcNow;
+                // Use the monitoring service for enhanced Boltcard tracking
+                var result = await _monitoringService.EnhancedBoltcardTrackingAsync(
+                    paymentHash, 
+                    amountSats, 
+                    boltcardId,
+                    CancellationToken.None);
 
-                while (DateTime.UtcNow - startTime < maxWaitTime)
+                if (result)
                 {
-                    try
-                    {
-                        _logger.LogInformation($"[BOLTCARD DEBUG] Enhanced tracking cycle {(DateTime.UtcNow - startTime).TotalSeconds:F1}s for {paymentHash}");
-
-                        // Ensure invoice stays in tracking dictionary with thread safety
-                        bool invoiceExists;
-                        lock (_invoiceTrackingLock)
-                        {
-                            invoiceExists = _pendingInvoices.ContainsKey(paymentHash);
-                        }
-
-                        if (!invoiceExists)
-                        {
-                            _logger.LogWarning($"[BOLTCARD DEBUG] Invoice {paymentHash} missing from pending dictionary, re-adding");
-                            // Try to re-add the invoice to tracking
-                            try
-                            {
-                                var invoice = await GetInvoice(paymentHash, CancellationToken.None);
-                                if (invoice != null)
-                                {
-                                    lock (_invoiceTrackingLock)
-                                    {
-                                        _pendingInvoices[paymentHash] = invoice;
-                                        _invoiceCreationTimes[paymentHash] = DateTime.UtcNow;
-                                    }
-                                    _logger.LogInformation($"[BOLTCARD DEBUG] Re-added invoice {paymentHash} to tracking");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning($"[BOLTCARD DEBUG] Could not re-add invoice to tracking: {ex.Message}");
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogInformation($"[BOLTCARD DEBUG] Invoice {paymentHash} still in pending dictionary");
-                        }
-
-                        // Try multiple approaches to detect payment
-
-                        // 1. Check Flash transaction history with broader search
-                        var isPaid = await CheckFlashTransactionHistory(paymentHash, amountSats);
-                        if (isPaid)
-                        {
-                            _logger.LogInformation($"[BOLTCARD DEBUG] Payment detected via transaction history: {paymentHash}");
-                            await MarkInvoiceAsPaid(paymentHash, amountSats, boltcardId);
-                            return;
-                        }
-
-                        // 1.5. Check if invoice was actually paid by querying Flash directly
-                        var currentInvoiceStatus = await GetInvoiceStatus(paymentHash);
-                        if (currentInvoiceStatus == LightningInvoiceStatus.Paid)
-                        {
-                            _logger.LogInformation($"[BOLTCARD DEBUG] Payment detected via direct invoice status check: {paymentHash}");
-                            await MarkInvoiceAsPaid(paymentHash, amountSats, boltcardId);
-                            return;
-                        }
-
-                        // 2. Check for any recent incoming transactions by timing (aggressive detection)
-                        var recentPayment = await CheckForRecentIncomingTransaction(amountSats);
-                        if (recentPayment)
-                        {
-                            _logger.LogInformation($"[BOLTCARD DEBUG] Payment detected via recent transaction timing: {paymentHash}");
-                            await MarkInvoiceAsPaid(paymentHash, amountSats, boltcardId);
-                            return;
-                        }
-
-                        // 3. Check account balance changes (for small amounts)
-                        if (amountSats <= 10000) // For amounts <= $1
-                        {
-                            var balanceIncrease = await CheckAccountBalanceIncrease(amountSats);
-                            if (balanceIncrease)
-                            {
-                                _logger.LogInformation($"[BOLTCARD DEBUG] Payment detected via balance increase: {paymentHash}");
-                                await MarkInvoiceAsPaid(paymentHash, amountSats, boltcardId);
-                                return;
-                            }
-                        }
-
-                        await Task.Delay(pollInterval);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning($"[BOLTCARD DEBUG] Error during enhanced tracking: {ex.Message}");
-                        await Task.Delay(pollInterval); // Don't spam on errors
-                    }
-                }
-
-                // For small Boltcard amounts, assume success after timeout
-                if (amountSats <= 5000) // For amounts <= $0.50
-                {
-                    _logger.LogInformation($"[BOLTCARD DEBUG] Timeout reached for small amount ({amountSats} sats <= $0.50). Checking if payment was actually received...");
-
-                    // Before marking as paid, do a final verification check
-                    var finalCheck = await CheckFlashTransactionHistory(paymentHash, amountSats);
-                    if (finalCheck)
-                    {
-                        _logger.LogInformation($"[BOLTCARD DEBUG] VERIFIED: Final check confirmed payment was actually received in Flash wallet: {paymentHash}");
-                    }
-                    else
-                    {
-                        _logger.LogError($"[BOLTCARD DEBUG] ❌ PROBLEM: Final verification could not find payment in Flash wallet! This suggests the QR code paid was NOT the Flash invoice. PaymentHash: {paymentHash}");
-                        _logger.LogError($"[BOLTCARD DEBUG] ❌ PROBLEM: Boltcard will NOT receive funds because payment went elsewhere (likely BTCPay Server's Lightning node instead of Flash)");
-
-                        // Don't mark as paid if we can't verify it actually reached Flash
-                        if (_boltcardTransactions.TryGetValue(paymentHash, out var transaction))
-                        {
-                            lock (_boltcardTrackingLock)
-                            {
-                                transaction.Status = "Failed - Payment not received by Flash";
-                                _boltcardTransactions[paymentHash] = transaction;
-                            }
-                        }
-
-                        _logger.LogError($"[BOLTCARD DEBUG] ❌ MARKED AS FAILED: {paymentHash}");
-                        return; // Don't mark as paid
-                    }
-
-                    await MarkInvoiceAsPaid(paymentHash, amountSats, boltcardId);
+                    _logger.LogInformation($"[BOLTCARD DEBUG] Transaction detected! Payment completed.");
                 }
                 else
                 {
-                    _logger.LogWarning($"[BOLTCARD DEBUG] Payment not detected within timeout: {paymentHash}");
-
-                    // Update Boltcard transaction status
-                    if (_boltcardTransactions.TryGetValue(paymentHash, out var transaction))
-                    {
-                        transaction.Status = "Timeout";
-                        _boltcardTransactions[paymentHash] = transaction;
-                    }
+                    _logger.LogWarning($"[BOLTCARD DEBUG] Transaction not detected after enhanced tracking.");
                 }
             }
             catch (Exception ex)
@@ -2962,43 +2786,11 @@ namespace BTCPayServer.Plugins.Flash
             }
         }
 
-        /// <summary>
-        /// Get invoice status directly from Flash API
-        /// </summary>
-        private async Task<LightningInvoiceStatus> GetInvoiceStatus(string paymentHash)
-        {
-            try
-            {
-                _logger.LogInformation($"[BOLTCARD DEBUG] Querying Flash API for invoice status: {paymentHash}");
-                var invoice = await GetInvoice(paymentHash, CancellationToken.None);
+        // GetInvoiceStatus method has been moved to FlashTransactionService
 
-                if (invoice != null)
-                {
-                    _logger.LogInformation($"[BOLTCARD DEBUG] Flash API returned invoice status: {invoice.Status}, Amount: {invoice.Amount}, AmountReceived: {invoice.AmountReceived}");
-
-                    if (invoice.Status == LightningInvoiceStatus.Paid)
-                    {
-                        _logger.LogInformation($"[BOLTCARD DEBUG] Flash API confirms invoice is PAID! Amount received: {invoice.AmountReceived}");
-                    }
-
-                    return invoice.Status;
-                }
-                else
-                {
-                    _logger.LogWarning($"[BOLTCARD DEBUG] Flash API returned null invoice for {paymentHash}");
-                    return LightningInvoiceStatus.Unpaid;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[BOLTCARD DEBUG] Error getting invoice status for {paymentHash}: {ex.Message}");
-                return LightningInvoiceStatus.Unpaid;
-            }
-        }
-
-        /// <summary>
-        /// Check Flash transaction history for payment confirmation
-        /// </summary>
+        // CheckFlashTransactionHistory method has been moved to FlashTransactionService
+        // The method was used to check Flash transaction history for payment confirmation
+        /*
         private async Task<bool> CheckFlashTransactionHistory(string paymentHash, long expectedAmount)
         {
             try
@@ -3223,10 +3015,11 @@ namespace BTCPayServer.Plugins.Flash
                 return false;
             }
         }
+        */
 
-        /// <summary>
-        /// Check for any recent incoming transactions by timing rather than exact amount matching
-        /// </summary>
+        // CheckForRecentIncomingTransaction method has been moved to FlashTransactionService
+        // The method was used to check for any recent incoming transactions by timing rather than exact amount matching
+        /*
         private async Task<bool> CheckForRecentIncomingTransaction(long expectedAmountSats)
         {
             try
@@ -3316,10 +3109,11 @@ namespace BTCPayServer.Plugins.Flash
                 return false;
             }
         }
+        */
 
-        /// <summary>
-        /// Check if account balance increased by expected amount
-        /// </summary>
+        // CheckAccountBalanceIncrease method has been moved to FlashTransactionService
+        // The method was used to check if account balance increased by expected amount
+        /*
         private async Task<bool> CheckAccountBalanceIncrease(long expectedAmountSats)
         {
             try
@@ -3358,42 +3152,9 @@ namespace BTCPayServer.Plugins.Flash
                 return false;
             }
         }
+        */
 
-        /// <summary>
-        /// Get current wallet balance
-        /// </summary>
-        private async Task<decimal?> GetWalletBalance()
-        {
-            try
-            {
-                var query = new GraphQLRequest
-                {
-                    Query = @"
-                    query getWalletBalance {
-                      me {
-                        defaultAccount {
-                          wallets {
-                            id
-                            walletCurrency
-                            balance {
-                              availableBalance
-                            }
-                          }
-                        }
-                      }
-                    }"
-                };
-
-                var response = await _graphQLClient.SendQueryAsync<WalletBalanceResponse>(query, CancellationToken.None);
-                var targetWallet = response.Data?.me?.defaultAccount?.wallets?.FirstOrDefault(w => w.id == _cachedWalletId);
-                return targetWallet?.balance?.availableBalance;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[BOLTCARD DEBUG] Error getting wallet balance: {ex.Message}");
-                return null;
-            }
-        }
+        // GetWalletBalance method has been moved to FlashTransactionService
 
         /// <summary>
         /// Mark invoice as paid and update Boltcard tracking
@@ -4283,6 +4044,32 @@ namespace BTCPayServer.Plugins.Flash
                 throw;
             }
         }
+        
+        private async Task<decimal> ConvertUsdCentsToSatoshis(decimal usdCents, CancellationToken cancellation = default)
+        {
+            try
+            {
+                // Get current BTC/USD exchange rate
+                decimal btcUsdRate = await GetBtcUsdExchangeRate(cancellation);
+
+                // Convert USD cents to satoshis
+                decimal usdAmount = usdCents / 100m; // Convert cents to USD
+                decimal btcAmount = usdAmount / btcUsdRate; // Convert USD to BTC
+                decimal satoshis = btcAmount * 100_000_000m; // Convert BTC to satoshis
+
+                // Round to whole satoshis
+                satoshis = Math.Round(satoshis, 0, MidpointRounding.AwayFromZero);
+
+                _logger.LogInformation($"[PAYMENT DEBUG] Converted {usdCents} USD cents to {satoshis} satoshis using rate {btcUsdRate} USD/BTC");
+
+                return satoshis;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[PAYMENT DEBUG] Error converting USD cents to satoshis");
+                throw;
+            }
+        }
 
         private class ExchangeRateResponse
         {
@@ -4300,6 +4087,19 @@ namespace BTCPayServer.Plugins.Flash
 
         // Add dedicated storage for pull payment amounts
         private readonly Dictionary<string, long> _pullPaymentAmounts = new Dictionary<string, long>();
+        
+        /// <summary>
+        /// Registers a pull payment invoice for proper amount handling
+        /// </summary>
+        /// <param name="invoiceId">The invoice ID or payment hash</param>
+        /// <param name="bolt11">The BOLT11 invoice string</param>
+        /// <param name="amountCents">The amount in cents for USD wallets</param>
+        public void RegisterPullPaymentInvoice(string invoiceId, string bolt11, long amountCents)
+        {
+            _logger.LogInformation($"[PULL PAYMENT] Registering pull payment invoice {invoiceId} with amount {amountCents} cents");
+            _pullPaymentInvoices[invoiceId] = bolt11;
+            _pullPaymentAmounts[bolt11] = amountCents;
+        }
 
         private async Task<decimal> GetBtcUsdExchangeRate(CancellationToken cancellation = default)
         {

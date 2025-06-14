@@ -247,6 +247,21 @@ namespace BTCPayServer.Plugins.Flash.Services
                 return new BoltcardStats();
             }
         }
+
+        public string ExtractSequenceFromMemo(string memo)
+        {
+            if (string.IsNullOrEmpty(memo))
+                return string.Empty;
+
+            // Look for sequence pattern SEQxxxxxx
+            var match = System.Text.RegularExpressions.Regex.Match(memo, @"SEQ\d+T\d+");
+            if (match.Success)
+            {
+                return match.Value;
+            }
+
+            return string.Empty;
+        }
     }
 
     /// <summary>

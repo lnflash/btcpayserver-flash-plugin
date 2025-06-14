@@ -1,11 +1,11 @@
 # BTCPayServer Flash Plugin - Development Roadmap
 
 ## Project Status
-- **Current Version**: 1.3.6-dev
-- **Last Stable Release**: 1.3.5
-- **Development Phase**: Service Architecture Implemented ✅ 
+- **Current Version**: 1.4.2
+- **Last Stable Release**: 1.4.2
+- **Development Phase**: Phase 2B Completed ✅ 
 
-## Recent Achievements (Completed Today)
+## Recent Achievements
 
 ### ✅ Service Architecture Foundation (Phase 1)
 - **Status**: COMPLETED - Clean separation of concerns achieved
@@ -49,24 +49,28 @@
 ### 🟡 HIGH PRIORITY (Next Sprint)
 
 #### 3. Complete Service Implementation (Phase 2B)
-- **Status**: 🔄 READY TO START
+- **Status**: ✅ COMPLETED
 - **Impact**: HIGH - Code quality and maintainability
 - **Effort**: MEDIUM
-- **Next Steps**:
-  - Move remaining helper methods to appropriate services
-  - Extract transaction monitoring logic to dedicated service
-  - Implement proper error handling patterns
-  - Add comprehensive unit tests for each service
+- **Completed**:
+  - ✅ Moved remaining helper methods to appropriate services
+  - ✅ Extracted transaction monitoring logic to dedicated service (FlashMonitoringService)
+  - ✅ Implemented proper error handling patterns with Polly retry policies
+  - ✅ Added comprehensive unit tests for each service
+  - ✅ Created FlashTransactionService and FlashWalletService
+  - ✅ Custom exception hierarchy with FlashPluginException
+  - ✅ Added GitHub source and documentation links
 
 #### 4. Enhanced Error Handling
-- **Status**: 📋 PLANNED
+- **Status**: ✅ COMPLETED (as part of Phase 2B)
 - **Impact**: HIGH - User experience
 - **Effort**: MEDIUM
-- **Issues**:
-  - Generic error messages don't help users troubleshoot
-  - Flash API errors need better translation
-  - Network timeouts not handled gracefully
-- **Solution**: Implement error handling service with user-friendly messages
+- **Completed**:
+  - ✅ Custom exception types with context and correlation IDs
+  - ✅ Retry policies with exponential backoff
+  - ✅ Circuit breaker patterns for API resilience
+  - ✅ User-friendly error messages in exceptions
+  - ✅ Proper timeout handling with configurable policies
 
 ### 🟢 MEDIUM PRIORITY (Future Releases)
 
@@ -123,14 +127,22 @@
 
 ## Architecture Evolution
 
-### Current State (v1.3.6-dev)
+### Current State (v1.4.0)
 ```
-FlashLightningClient (Orchestrator)
-    ├── IFlashGraphQLService (API Communication)
-    ├── IFlashInvoiceService (Invoice Management)
-    ├── IFlashPaymentService (Payment Processing)
-    ├── IFlashBoltcardService (Boltcard Features)
-    └── IFlashExchangeRateService (Currency Conversion)
+FlashLightningClient (Thin Orchestration Layer)
+    ├── Core Services
+    │   ├── IFlashGraphQLService (API Communication)
+    │   ├── IFlashInvoiceService (Invoice Management)
+    │   ├── IFlashPaymentService (Payment Processing)
+    │   └── IFlashExchangeRateService (Currency Conversion)
+    ├── Feature Services
+    │   ├── IFlashBoltcardService (Boltcard Features)
+    │   ├── IFlashMonitoringService (Payment Monitoring)
+    │   ├── IFlashTransactionService (Transaction Operations)
+    │   └── IFlashWalletService (Wallet Management)
+    └── Support Services
+        ├── FlashRetryPolicies (Resilience Patterns)
+        └── FlashExceptions (Error Handling)
 ```
 
 ### Target State (v1.4.0)
@@ -178,6 +190,12 @@ FlashLightningClient (Thin Interface Layer)
 ## Version History
 - **v1.3.5**: Stable release with LNURL support
 - **v1.3.6-dev**: Service architecture refactoring
-- **v1.4.0** (planned): Complete service implementation
-- **v1.5.0** (planned): Enhanced monitoring and diagnostics
+- **v1.4.0**: ✅ Complete service implementation with enhanced error handling
+  - Comprehensive service architecture
+  - Polly retry policies and circuit breakers
+  - Enhanced Boltcard payment detection
+  - WebSocket support for real-time updates
+  - Full unit test coverage for services
+  - Documentation and GitHub integration
+- **v1.5.0** (planned): Performance optimization and monitoring
 - **v2.0.0** (future): Multi-wallet support with UI overhaul

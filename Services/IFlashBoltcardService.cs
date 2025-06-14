@@ -36,6 +36,11 @@ namespace BTCPayServer.Plugins.Flash.Services
         long CalculateAmountTolerance(long amountSats);
 
         /// <summary>
+        /// Extract sequence number from transaction memo
+        /// </summary>
+        string ExtractSequenceFromMemo(string memo);
+
+        /// <summary>
         /// Get all Boltcard transactions
         /// </summary>
         List<BoltcardTransaction> GetBoltcardTransactions(int limit = 50);

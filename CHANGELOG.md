@@ -5,6 +5,53 @@ All notable changes to the BTCPayServer Flash Plugin will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2025-06-13
+
+### Fixed
+- Critical: Removed hardcoded WebSocket endpoints - now dynamically derived from API endpoint
+- External link generation now uses configured Flash instance instead of hardcoded URL
+- Made plugin domain-agnostic to work on any BTCPay Server instance
+
+### Changed
+- WebSocket endpoint logic now intelligently derives from API configuration:
+  - `api.domain.com` → `ws.domain.com`
+  - Localhost and IP addresses maintain the same host
+  - Automatic protocol selection (wss/ws) based on API scheme
+- External links now derived from connection string configuration
+
+### Technical Improvements
+- Better support for custom Flash API deployments
+- Improved domain detection and URL generation
+- Enhanced compatibility with various hosting configurations
+
+## [1.4.1] - 2025-06-13
+
+### Added
+- Complete Lightning interface implementation with PayInvoiceParams support
+- ListPaymentsAsync method for payment history display
+- Comprehensive error handling framework with retry logic
+- Connection string validation service
+- Payment caching system for immediate detection (5-minute cache)
+- User-friendly error messages for common issues
+- Production readiness documentation
+
+### Fixed
+- Critical: Boltcard payment detection using proper hex payment hash format
+- Critical: Pull payment amount interpretation (satoshis vs USD conversion)
+- Payment hash extraction from BOLT11 using NBitcoin library
+- Race condition between payment completion and status queries
+
+### Changed
+- Improved minimum amount validation with clear error messages
+- Enhanced logging for payment flows
+- Better null reference handling throughout codebase
+
+### Technical Improvements
+- Centralized error handling with FlashErrorHandler service
+- Exponential backoff for transient failures
+- Removed code duplication in payment processing
+- Improved service separation and dependency injection
+
 ## [1.4.0] - 2025-01-13
 
 ### Added

@@ -6,13 +6,13 @@ The Flash plugin version is defined in multiple places, and all must be kept in 
 
 1. **FlashPlugin.cs**: 
    ```csharp
-   public override Version Version => new Version(1, 3, 5);
+   public override Version Version => new Version(1, 4, 2);
    ```
 
 2. **manifest.json**:
    ```json
    {
-     "version": "1.3.5",
+     "version": "1.4.2",
      ...
    }
    ```
@@ -20,7 +20,7 @@ The Flash plugin version is defined in multiple places, and all must be kept in 
 3. **BTCPayServer.Plugins.Flash.csproj**:
    ```xml
    <PropertyGroup>
-     <Version>1.3.5</Version>
+     <Version>1.4.2</Version>
      ...
    </PropertyGroup>
    ```
@@ -54,9 +54,25 @@ If it shows an incorrect version (like 1.3.4 when you're releasing 1.3.5), check
 
 ## Remember:
 
-Always update all three version numbers together:
-1. **FlashPlugin.cs**
-2. **manifest.json**
-3. **BTCPayServer.Plugins.Flash.csproj**
+Always update all version numbers together:
+1. **FlashPlugin.cs** - `Version` property
+2. **manifest.json** - `"version"` field
+3. **BTCPayServer.Plugins.Flash.csproj** - `<Version>` tag
+4. **btcpayserver.json** - `"Version"` field (added in v1.4+)
 
 This ensures the plugin reports the correct version to BTCPayServer and in the logs.
+
+## Complete Version Update Checklist
+
+When releasing a new version:
+- [ ] Update `BTCPayServer.Plugins.Flash.csproj` - `<Version>` tag
+- [ ] Update `FlashPlugin.cs` - `Version` property
+- [ ] Update `manifest.json` - `"version"` field
+- [ ] Update `btcpayserver.json` - `"Version"` field
+- [ ] Update `CHANGELOG.md` - Add new version entry
+- [ ] Update `README.md` - Update "Latest" version in Version History
+- [ ] Update `PRODUCTION_READINESS.md` - Update "Current Version"
+- [ ] Create release notes in `releases/RELEASE_NOTES_vX.X.X.md`
+- [ ] Build the package with `./build-package.sh`
+- [ ] Copy package to `releases/BTCPayServer.Plugins.Flash-vX.X.X.btcpay`
+- [ ] Test the package version after installation

@@ -2,10 +2,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Plugins.Flash.Exceptions;
 using GraphQL;
 using GraphQL.Client.Abstractions;
 using GraphQL.Client.Http;
@@ -13,6 +15,7 @@ using GraphQL.Client.Serializer.Newtonsoft;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Polly;
 
 namespace BTCPayServer.Plugins.Flash.Services
 {
@@ -26,6 +29,8 @@ namespace BTCPayServer.Plugins.Flash.Services
         private readonly string _bearerToken;
         private readonly HttpClient _httpClient;
         private readonly ILoggerFactory? _loggerFactory;
+        private readonly IAsyncPolicy _retryPolicy;
+        private readonly IAsyncPolicy<HttpResponseMessage> _httpPolicy;
 
         // Cache for wallet information
         private WalletInfo? _cachedWallet;
@@ -42,6 +47,10 @@ namespace BTCPayServer.Plugins.Flash.Services
             _bearerToken = bearerToken ?? throw new ArgumentNullException(nameof(bearerToken));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _loggerFactory = loggerFactory;
+            
+            // Initialize retry policies
+            _retryPolicy = FlashRetryPolicies.GetGraphQLRetryPolicy(_logger);
+            _httpPolicy = FlashRetryPolicies.GetCombinedHttpPolicy(_logger);
 
             // Create HttpClient with logging handler if logger factory is available
             if (httpClient != null)
@@ -93,26 +102,63 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         public async Task<GraphQLResponse<T>> SendQueryAsync<T>(GraphQLRequest request, CancellationToken cancellation = default)
         {
-            try
-            {
-                _logger.LogInformation("[GraphQL Request] Query: {Query}, Variables: {Variables}, Operation: {Operation}", 
-                    request.Query?.Replace("\n", " ").Replace("  ", " ").Trim(), 
-                    request.Variables != null ? JsonConvert.SerializeObject(request.Variables) : "null",
-                    request.OperationName ?? "null");
-                
-                var response = await _graphQLClient.SendQueryAsync<T>(request, cancellation);
-                
-                _logger.LogInformation("[GraphQL Response] Data: {Data}, Errors: {Errors}", 
-                    response.Data != null ? JsonConvert.SerializeObject(response.Data) : "null",
-                    response.Errors != null ? JsonConvert.SerializeObject(response.Errors) : "null");
-                
-                return response;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error sending GraphQL query: {Query}", request.Query);
-                throw;
-            }
+            return await FlashRetryPolicies.ExecuteWithRetryAsync(
+                async () =>
+                {
+                    try
+                    {
+                        _logger.LogInformation("[GraphQL Request] Query: {Query}, Variables: {Variables}, Operation: {Operation}", 
+                            request.Query?.Replace("\n", " ").Replace("  ", " ").Trim(), 
+                            request.Variables != null ? JsonConvert.SerializeObject(request.Variables) : "null",
+                            request.OperationName ?? "null");
+                        
+                        var response = await _graphQLClient.SendQueryAsync<T>(request, cancellation);
+                        
+                        _logger.LogInformation("[GraphQL Response] Data: {Data}, Errors: {Errors}", 
+                            response.Data != null ? JsonConvert.SerializeObject(response.Data) : "null",
+                            response.Errors != null ? JsonConvert.SerializeObject(response.Errors) : "null");
+                        
+                        if (response.Errors?.Length > 0)
+                        {
+                            var errorMessages = string.Join(", ", response.Errors.Select(e => e.Message));
+                            
+                            // Check for specific error types
+                            if (response.Errors.Any(e => e.Message?.Contains("authentication", StringComparison.OrdinalIgnoreCase) == true ||
+                                                         e.Message?.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) == true))
+                            {
+                                throw new FlashAuthenticationException($"Authentication failed: {errorMessages}");
+                            }
+                            
+                            // GraphQL errors are generally not retryable unless they indicate a server issue
+                            var isRetryable = response.Errors.Any(e => e.Message?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true ||
+                                                                       e.Message?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true);
+                            
+                            throw new FlashApiException($"GraphQL query failed: {errorMessages}", response.Errors, isRetryable);
+                        }
+                        
+                        return response;
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        _logger.LogError(ex, "HTTP error sending GraphQL query");
+                        throw new FlashApiException("Network error communicating with Flash API", 
+                            null, null, true, ex);
+                    }
+                    catch (TaskCanceledException ex)
+                    {
+                        _logger.LogError(ex, "GraphQL query timeout");
+                        throw new FlashApiException("Flash API request timeout", 
+                            HttpStatusCode.RequestTimeout, null, true, ex);
+                    }
+                    catch (Exception ex) when (!(ex is FlashPluginException))
+                    {
+                        _logger.LogError(ex, "Unexpected error sending GraphQL query: {Query}", request.Query);
+                        throw new FlashPluginException("Unexpected error in GraphQL query", "GRAPHQL_UNEXPECTED_ERROR", false, ex);
+                    }
+                },
+                _retryPolicy,
+                "GraphQL Query",
+                _logger);
         }
 
         public async Task<GraphQLResponse<T>> SendMutationAsync<T>(GraphQLRequest request, CancellationToken cancellation = default)

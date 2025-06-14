@@ -58,3 +58,10 @@
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Views/UIFlash/BoltcardInvoice.cshtml
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Views/UIFlash/BoltcardSuccess.cshtml
 /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Views/UIFlashBoltcard/BoltcardDashboard.cshtml
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.DependencyInjection.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.Http.Polly.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.Logging.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Microsoft.Extensions.Options.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Polly.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Polly.Core.dll
+/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/Polly.Extensions.Http.dll

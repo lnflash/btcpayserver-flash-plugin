@@ -32,7 +32,7 @@ namespace BTCPayServer.Plugins.Flash
         public override string Identifier => "BTCPayServer.Plugins.Flash";
         public override string Name => "Flash";
         public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
-        public override Version Version => new Version(1, 4, 0);
+        public override Version Version => new Version(1, 4, 2);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
@@ -86,11 +86,14 @@ namespace BTCPayServer.Plugins.Flash
                 // Register WebSocket service for real-time updates
                 applicationBuilder.AddScoped<IFlashWebSocketService, FlashWebSocketService>();
                 
-                // Register Boltcard invoice poller for payment detection
+                // Register core services
                 applicationBuilder.AddScoped<IFlashGraphQLService, FlashGraphQLService>();
                 applicationBuilder.AddScoped<IFlashInvoiceService, FlashInvoiceService>();
                 applicationBuilder.AddScoped<IFlashExchangeRateService, FlashExchangeRateService>();
                 applicationBuilder.AddScoped<IFlashBoltcardService, FlashBoltcardService>();
+                applicationBuilder.AddScoped<IFlashTransactionService, FlashTransactionService>();
+                applicationBuilder.AddScoped<IFlashWalletService, FlashWalletService>();
+                applicationBuilder.AddScoped<IFlashMonitoringService, FlashMonitoringService>();
                 applicationBuilder.AddScoped<IFlashPaymentService>(provider => 
                     new FlashPaymentService(
                         provider.GetRequiredService<IFlashGraphQLService>(),

@@ -162,6 +162,26 @@ namespace BTCPayServer.Plugins.Flash
 
         public string GetExternalLink(string connectionString, BTCPayNetwork network)
         {
+            try
+            {
+                var parsed = Parse(connectionString);
+                if (parsed.Endpoint != null && !string.IsNullOrEmpty(parsed.Endpoint))
+                {
+                    var uri = new Uri(parsed.Endpoint);
+                    // Transform API URL to main website URL
+                    var host = uri.Host;
+                    if (host.StartsWith("api.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        host = host.Substring(4); // Remove "api." prefix
+                    }
+                    return $"{uri.Scheme}://{host}";
+                }
+            }
+            catch
+            {
+                // Fallback to default if parsing fails
+            }
+            
             return "https://flashapp.me";
         }
 

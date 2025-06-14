@@ -32,6 +32,7 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         public bool IsConnected => _webSocket?.State == WebSocketState.Open;
         public event EventHandler<InvoiceUpdateEventArgs>? InvoiceUpdated;
+        public event EventHandler<PaymentReceivedEventArgs>? PaymentReceived;
 
         public FlashWebSocketService(ILogger<FlashWebSocketService> logger)
         {
