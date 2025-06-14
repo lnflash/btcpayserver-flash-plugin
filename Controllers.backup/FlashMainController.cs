@@ -45,16 +45,30 @@ namespace BTCPayServer.Plugins.Flash.Controllers
         [Authorize(Policy = Policies.CanViewStoreSettings)]
         public async Task<IActionResult> Dashboard(string storeId)
         {
-            var store = await _storeRepository.FindStore(storeId);
-            if (store == null)
-                return NotFound();
+            try
+            {
+                _logger.LogInformation($"Flash Dashboard accessed for store {storeId}");
+                
+                var store = await _storeRepository.FindStore(storeId);
+                if (store == null)
+                {
+                    _logger.LogWarning($"Store {storeId} not found");
+                    return NotFound();
+                }
 
-            var settings = await GetSettings(storeId);
-            ViewData["IsConfigured"] = settings.IsConfigured;
-            ViewData["PluginVersion"] = _plugin.Version.ToString();
-            ViewData["StoreId"] = storeId;
+                var settings = await GetSettings(storeId);
+                ViewData["IsConfigured"] = settings.IsConfigured;
+                ViewData["PluginVersion"] = _plugin.Version.ToString();
+                ViewData["StoreId"] = storeId;
 
-            return View("Dashboard", storeId);
+                _logger.LogInformation($"Returning Flash Dashboard view for store {storeId}");
+                return View("~/Views/FlashMain/Dashboard.cshtml", storeId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error in Flash Dashboard for store {storeId}");
+                throw;
+            }
         }
 
         [HttpGet("settings")]
@@ -66,7 +80,8 @@ namespace BTCPayServer.Plugins.Flash.Controllers
                 return NotFound();
 
             var settings = await GetSettings(storeId);
-            return View(settings);
+            ViewData["StoreId"] = storeId;
+            return View("~/Views/FlashMain/Settings.cshtml", settings);
         }
 
         [HttpPost("settings")]

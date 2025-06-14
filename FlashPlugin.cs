@@ -34,7 +34,7 @@ namespace BTCPayServer.Plugins.Flash
         public override string Identifier => "BTCPayServer.Plugins.Flash";
         public override string Name => "Flash";
         public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
-        public override Version Version => new Version(1, 4, 8);
+        public override Version Version => new Version(1, 5, 0);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
@@ -56,33 +56,9 @@ namespace BTCPayServer.Plugins.Flash
                 _logger?.LogInformation("Flash Plugin: Starting plugin initialization");
                 FlashPluginLogger.Log("Got logger service");
 
-                // Simple UI extension for Lightning setup
-                applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Flash/LNPaymentMethodSetupTab");
-
-                // Add a simple navigation item
-                try
-                {
-                    applicationBuilder.AddUIExtension("header-nav", "Flash/BasicNav");
-                }
-                catch (Exception ex)
-                {
-                    FlashPluginLogger.Log($"Error adding header-nav extension: {ex.Message}");
-                    // Fallback to another extension point
-                    try
-                    {
-                        applicationBuilder.AddUIExtension("navbar", "Flash/BasicNav");
-                    }
-                    catch (Exception fallbackEx)
-                    {
-                        FlashPluginLogger.Log($"Error adding navbar extension: {fallbackEx.Message}");
-                    }
-                }
-
-                // Add store navigation items
-                applicationBuilder.AddUIExtension("store-nav", "Flash/_Nav");
-                
-                _logger?.LogInformation("Flash Plugin: Registered UI extensions");
-                FlashPluginLogger.Log("Registered UI extensions");
+                // UI extensions temporarily removed for rebuild
+                _logger?.LogInformation("Flash Plugin: UI extensions disabled for rebuild");
+                FlashPluginLogger.Log("UI extensions disabled for rebuild");
 
                 // Register the Flash Lightning client service
                 applicationBuilder.AddSingleton<FlashLightningConnectionStringHandler>();
@@ -231,15 +207,10 @@ namespace BTCPayServer.Plugins.Flash
                 _logger?.LogInformation("Flash Plugin: Registered Pull Payment handlers");
                 FlashPluginLogger.Log("Registered Pull Payment handlers");
 
-                // Register controllers
-                applicationBuilder.AddScoped<Controllers.BoltcardTopupController>();
-                applicationBuilder.AddScoped<Controllers.FlashMainController>();
-                applicationBuilder.AddScoped<Controllers.UIFlashController>();
-                applicationBuilder.AddScoped<Controllers.FlashRedirectController>();
-                applicationBuilder.AddScoped<Controllers.FlashPayoutController>();
+                // Controllers temporarily removed for UI rebuild
                 applicationBuilder.AddSingleton<FlashPlugin>(this);
-                _logger?.LogInformation("Flash Plugin: Registered controllers");
-                FlashPluginLogger.Log("Registered controllers");
+                _logger?.LogInformation("Flash Plugin: Controllers disabled for UI rebuild");
+                FlashPluginLogger.Log("Controllers disabled for UI rebuild");
 
                 base.Execute(applicationBuilder);
                 _logger?.LogInformation("Flash Plugin: Initialization completed successfully");

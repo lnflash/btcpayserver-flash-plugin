@@ -13,7 +13,7 @@
   <PropertyGroup>
     <Product>Flash</Product>
     <Description>Flash integration with LNURL and Lightning Address support</Description>
-    <Version>1.4.8</Version>
+    <Version>1.5.0</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <RootNamespace>BTCPayServer.Plugins.Flash</RootNamespace>
   </PropertyGroup>
