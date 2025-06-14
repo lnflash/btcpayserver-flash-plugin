@@ -40,4 +40,8 @@
     <li class="nav-item nav-item-sub">
         <a permission="@Policies.CanViewStoreSettings" asp-controller="FlashMain" asp-action="Settings" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Flash", null, "Settings")">Settings</a>
     </li>
+    
+    <li class="nav-item nav-item-sub">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="FlashPayout" asp-action="Dashboard" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Flash", null, "PayoutDashboard")">Flash Payouts</a>
+    </li>
 }

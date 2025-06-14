@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v8.0": {
-      "BTCPayServer.Plugins.Flash/1.4.4": {
+      "BTCPayServer.Plugins.Flash/1.4.5": {
         "dependencies": {
           "BTCPayServer": "2.1.1",
           "GraphQL.Client": "6.0.2",
@@ -1589,7 +1589,7 @@
     }
   },
   "libraries": {
-    "BTCPayServer.Plugins.Flash/1.4.4": {
+    "BTCPayServer.Plugins.Flash/1.4.5": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
