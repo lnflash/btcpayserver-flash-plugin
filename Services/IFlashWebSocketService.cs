@@ -2,6 +2,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Plugins.Flash.Models;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Flash.Services
@@ -25,6 +26,16 @@ namespace BTCPayServer.Plugins.Flash.Services
         /// Check if WebSocket is currently connected
         /// </summary>
         bool IsConnected { get; }
+        
+        /// <summary>
+        /// Current connection state
+        /// </summary>
+        WebSocketConnectionState ConnectionState { get; }
+        
+        /// <summary>
+        /// Connection health metrics
+        /// </summary>
+        WebSocketHealthMetrics HealthMetrics { get; }
 
         /// <summary>
         /// Event raised when an invoice is updated
@@ -35,6 +46,11 @@ namespace BTCPayServer.Plugins.Flash.Services
         /// Event raised when a payment is received
         /// </summary>
         event EventHandler<PaymentReceivedEventArgs> PaymentReceived;
+        
+        /// <summary>
+        /// Event raised when connection state changes
+        /// </summary>
+        event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
 
         /// <summary>
         /// Subscribe to real-time updates for a specific invoice payment request

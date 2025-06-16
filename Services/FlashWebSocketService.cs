@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Lightning;
+using BTCPayServer.Plugins.Flash.Models;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -23,33 +24,90 @@ namespace BTCPayServer.Plugins.Flash.Services
         private CancellationTokenSource? _disconnectTokenSource;
         private Task? _receiveLoopTask;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1);
+        private readonly SemaphoreSlim _connectionLock = new SemaphoreSlim(1);
         private readonly HashSet<string> _subscribedInvoices = new HashSet<string>();
         private readonly Dictionary<string, string> _subscriptionToPaymentRequest = new();
         private string? _bearerToken;
         private Uri? _wsEndpoint;
         private readonly Dictionary<string, TaskCompletionSource<bool>> _pendingOperations = new();
         private int _messageId = 0;
+        private int _reconnectAttempt = 0;
+        private readonly WebSocketRetryPolicy _retryPolicy;
+        private readonly WebSocketHealthMetrics _healthMetrics;
+        private WebSocketConnectionState _connectionState = WebSocketConnectionState.Disconnected;
+        private Timer? _pingTimer;
+        private DateTime _lastPongReceived = DateTime.UtcNow;
 
-        public bool IsConnected => _webSocket?.State == WebSocketState.Open;
+        public bool IsConnected => _connectionState == WebSocketConnectionState.Connected;
+        public WebSocketConnectionState ConnectionState => _connectionState;
+        public WebSocketHealthMetrics HealthMetrics => _healthMetrics;
+        
         public event EventHandler<InvoiceUpdateEventArgs>? InvoiceUpdated;
         public event EventHandler<PaymentReceivedEventArgs>? PaymentReceived;
+        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         public FlashWebSocketService(ILogger<FlashWebSocketService> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _retryPolicy = new WebSocketRetryPolicy
+            {
+                InitialDelay = TimeSpan.FromSeconds(1),
+                MaxDelay = TimeSpan.FromMinutes(2),
+                BackoffMultiplier = 2.0,
+                MaxJitter = TimeSpan.FromSeconds(3),
+                MaxRetryAttempts = 10
+            };
+            _healthMetrics = new WebSocketHealthMetrics();
+        }
+
+        private void SetConnectionState(WebSocketConnectionState newState, string? reason = null, Exception? exception = null)
+        {
+            if (_connectionState == newState) return;
+            
+            var previousState = _connectionState;
+            _connectionState = newState;
+            
+            _logger.LogInformation("WebSocket connection state changed from {PreviousState} to {CurrentState}. Reason: {Reason}", 
+                previousState, newState, reason ?? "State transition");
+            
+            ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(
+                previousState, newState, reason, exception));
         }
 
         public async Task ConnectAsync(string bearerToken, Uri websocketEndpoint, CancellationToken cancellation = default)
         {
-            if (IsConnected)
+            await _connectionLock.WaitAsync(cancellation);
+            try
             {
-                _logger.LogWarning("WebSocket already connected");
-                return;
+                if (_connectionState == WebSocketConnectionState.Connected)
+                {
+                    _logger.LogDebug("WebSocket already connected");
+                    return;
+                }
+                
+                if (_connectionState == WebSocketConnectionState.Connecting || 
+                    _connectionState == WebSocketConnectionState.Reconnecting)
+                {
+                    _logger.LogWarning("Connection attempt already in progress");
+                    return;
+                }
+
+                _bearerToken = bearerToken;
+                _wsEndpoint = websocketEndpoint;
+                
+                await ConnectInternalAsync(cancellation);
             }
+            finally
+            {
+                _connectionLock.Release();
+            }
+        }
+        
+        private async Task ConnectInternalAsync(CancellationToken cancellation = default)
+        {
 
-            _bearerToken = bearerToken;
-            _wsEndpoint = websocketEndpoint;
-
+            SetConnectionState(WebSocketConnectionState.Connecting, "Initiating connection");
+            
             try
             {
                 _webSocket = new ClientWebSocket();
@@ -57,13 +115,18 @@ namespace BTCPayServer.Plugins.Flash.Services
                 _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
                 
                 // Add Authorization header to the WebSocket handshake
-                _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {bearerToken}");
+                _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {_bearerToken}");
                 
                 // Try different protocols - Flash might use graphql-transport-ws instead
                 _webSocket.Options.AddSubProtocol("graphql-transport-ws");
 
-                _logger.LogInformation("Connecting to Flash WebSocket at {Endpoint} with Authorization header and multiple protocols", websocketEndpoint);
-                await _webSocket.ConnectAsync(websocketEndpoint, cancellation);
+                _logger.LogInformation("Connecting to Flash WebSocket at {Endpoint} (attempt #{Attempt})", 
+                    _wsEndpoint, _reconnectAttempt + 1);
+                    
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                timeoutCts.CancelAfter(_retryPolicy.ConnectionTimeout);
+                
+                await _webSocket.ConnectAsync(_wsEndpoint!, timeoutCts.Token);
                 
                 // Verify connection is established
                 if (_webSocket.State != WebSocketState.Open)
@@ -86,7 +149,16 @@ namespace BTCPayServer.Plugins.Flash.Services
                 var ackReceived = await WaitForConnectionAck();
                 if (ackReceived)
                 {
-                    _logger.LogInformation("Successfully connected to Flash WebSocket with protocol: {Protocol}", _webSocket?.SubProtocol ?? "none");
+                    _logger.LogInformation("Successfully connected to Flash WebSocket with protocol: {Protocol}", 
+                        _webSocket?.SubProtocol ?? "none");
+                    
+                    // Connection successful - reset retry counter and update state
+                    _reconnectAttempt = 0;
+                    SetConnectionState(WebSocketConnectionState.Connected, "Connection established");
+                    _healthMetrics.RecordConnectionEstablished();
+                    
+                    // Start ping timer
+                    StartPingTimer();
                 }
                 else
                 {
@@ -98,21 +170,89 @@ namespace BTCPayServer.Plugins.Flash.Services
             {
                 _logger.LogInformation("WebSocket endpoint does not support WebSocket protocol. This is normal - Flash may not have WebSocket support enabled.");
                 await CleanupConnection();
+                SetConnectionState(WebSocketConnectionState.Failed, "WebSocket protocol not supported", wsEx);
                 throw;
             }
             catch (System.Net.WebSockets.WebSocketException wsEx) when (wsEx.Message.Contains("503"))
             {
                 _logger.LogInformation("Flash WebSocket service temporarily unavailable (503). This is normal - using polling instead.");
+                _healthMetrics.RecordError();
+                await CleanupConnection();
+                await HandleReconnectAsync("Service unavailable", wsEx, cancellation);
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                _logger.LogDebug("Connection attempt cancelled");
+                SetConnectionState(WebSocketConnectionState.Disconnected, "Connection cancelled");
                 await CleanupConnection();
                 throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to connect to Flash WebSocket: {ErrorType} - {Message}. Falling back to polling.", 
+                _logger.LogWarning(ex, "Failed to connect to Flash WebSocket: {ErrorType} - {Message}", 
                     ex.GetType().Name, ex.Message);
+                _healthMetrics.RecordError();
                 await CleanupConnection();
+                await HandleReconnectAsync($"Connection failed: {ex.Message}", ex, cancellation);
                 throw;
             }
+        }
+        
+        private async Task HandleReconnectAsync(string reason, Exception? exception, CancellationToken cancellation)
+        {
+            if (cancellation.IsCancellationRequested)
+            {
+                SetConnectionState(WebSocketConnectionState.Disconnected, "Reconnection cancelled");
+                return;
+            }
+            
+            _reconnectAttempt++;
+            
+            if (_retryPolicy.MaxRetryAttempts > 0 && _reconnectAttempt > _retryPolicy.MaxRetryAttempts)
+            {
+                _logger.LogError("Maximum reconnection attempts ({MaxAttempts}) exceeded. Giving up.", 
+                    _retryPolicy.MaxRetryAttempts);
+                SetConnectionState(WebSocketConnectionState.Failed, "Maximum reconnection attempts exceeded", exception);
+                return;
+            }
+            
+            var delay = _retryPolicy.CalculateDelay(_reconnectAttempt);
+            _logger.LogInformation("Scheduling reconnection attempt #{Attempt} after {Delay:F1} seconds. Reason: {Reason}", 
+                _reconnectAttempt, delay.TotalSeconds, reason);
+            
+            SetConnectionState(WebSocketConnectionState.Reconnecting, reason, exception);
+            _healthMetrics.RecordReconnect();
+            
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(delay, cancellation);
+                    if (!cancellation.IsCancellationRequested)
+                    {
+                        await ConnectAsync(_bearerToken!, _wsEndpoint!, cancellation);
+                        
+                        // Re-subscribe to all previously subscribed invoices
+                        var invoicesToResubscribe = _subscribedInvoices.ToList();
+                        foreach (var invoiceId in invoicesToResubscribe)
+                        {
+                            try
+                            {
+                                await SubscribeToInvoiceUpdatesAsync(invoiceId, cancellation);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to re-subscribe to invoice {InvoiceId}", invoiceId);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Reconnection attempt failed");
+                }
+            }, cancellation);
         }
 
         private async Task SendConnectionInitMessage(CancellationToken cancellation)
@@ -241,6 +381,34 @@ namespace BTCPayServer.Plugins.Flash.Services
             _logger.LogInformation("Unsubscribed from updates for invoice {InvoiceId}", invoiceId);
         }
 
+        private void StartPingTimer()
+        {
+            _pingTimer?.Dispose();
+            _pingTimer = new Timer(async _ =>
+            {
+                try
+                {
+                    if (IsConnected)
+                    {
+                        // Check if we've received a pong recently
+                        var timeSinceLastPong = DateTime.UtcNow - _lastPongReceived;
+                        if (timeSinceLastPong > TimeSpan.FromMinutes(2))
+                        {
+                            _logger.LogWarning("No pong received for {Minutes:F1} minutes. Connection may be stale.", 
+                                timeSinceLastPong.TotalMinutes);
+                        }
+                        
+                        // Send ping
+                        await SendMessageAsync(JsonConvert.SerializeObject(new { type = "ping" }), CancellationToken.None);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send ping");
+                }
+            }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        }
+
         private async Task SendMessageAsync(string message, CancellationToken cancellation)
         {
             if (_webSocket == null || _webSocket.State != WebSocketState.Open)
@@ -254,6 +422,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                 var bytes = Encoding.UTF8.GetBytes(message);
                 await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellation);
                 _logger.LogDebug("Sent WebSocket message: {Message}", message);
+                _healthMetrics.RecordMessageSent();
             }
             finally
             {
@@ -265,6 +434,8 @@ namespace BTCPayServer.Plugins.Flash.Services
         {
             var buffer = new ArraySegment<byte>(new byte[4096]);
             var messageBuilder = new StringBuilder();
+            var closeReason = "Unknown";
+            Exception? closeException = null;
 
             try
             {
@@ -286,49 +457,49 @@ namespace BTCPayServer.Plugins.Flash.Services
                     {
                         var message = messageBuilder.ToString();
                         _logger.LogDebug("Received WebSocket message: {Message}", message);
+                        _healthMetrics.RecordMessageReceived();
                         ProcessMessage(message);
                     }
                     else if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        _logger.LogInformation("WebSocket closed by server");
+                        closeReason = $"Server closed connection: {result.CloseStatus} - {result.CloseStatusDescription}";
+                        _logger.LogInformation(closeReason);
                         break;
                     }
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
-                _logger.LogInformation("WebSocket receive loop cancelled");
+                closeReason = "Receive loop cancelled";
+                _logger.LogDebug(closeReason);
+            }
+            catch (WebSocketException wsEx) when (wsEx.Message.Contains("remote party closed"))
+            {
+                closeReason = "Remote party closed connection without proper handshake";
+                closeException = wsEx;
+                _logger.LogWarning(wsEx, closeReason);
+                _healthMetrics.RecordError();
             }
             catch (Exception ex)
             {
+                closeReason = $"Error in receive loop: {ex.Message}";
+                closeException = ex;
                 _logger.LogError(ex, "Error in WebSocket receive loop");
+                _healthMetrics.RecordError();
             }
 
-            // Attempt reconnection if not intentionally disconnected
-            if (!cancellation.IsCancellationRequested)
+            // Handle disconnection
+            if (_connectionState == WebSocketConnectionState.Connected)
             {
-                _logger.LogInformation("Attempting to reconnect WebSocket");
-                _ = Task.Run(async () =>
+                if (cancellation.IsCancellationRequested)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5));
-                    if (_bearerToken != null && _wsEndpoint != null)
-                    {
-                        try
-                        {
-                            await ConnectAsync(_bearerToken, _wsEndpoint);
-
-                            // Re-subscribe to all previously subscribed invoices
-                            foreach (var invoiceId in _subscribedInvoices.ToList())
-                            {
-                                await SubscribeToInvoiceUpdatesAsync(invoiceId);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Failed to reconnect WebSocket");
-                        }
-                    }
-                });
+                    SetConnectionState(WebSocketConnectionState.Disconnecting, closeReason);
+                }
+                else
+                {
+                    // Unintentional disconnect - attempt reconnection
+                    await HandleReconnectAsync(closeReason, closeException, CancellationToken.None);
+                }
             }
         }
 
@@ -372,12 +543,18 @@ namespace BTCPayServer.Plugins.Flash.Services
                             try
                             {
                                 await SendMessageAsync(JsonConvert.SerializeObject(new { type = "pong" }), CancellationToken.None);
+                                _logger.LogDebug("Sent pong response");
                             }
                             catch (Exception ex)
                             {
                                 _logger.LogError(ex, "Failed to send pong");
                             }
                         });
+                        break;
+                        
+                    case "pong":
+                        _lastPongReceived = DateTime.UtcNow;
+                        _logger.LogDebug("Received pong response");
                         break;
 
                     default:
@@ -443,49 +620,117 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         public async Task DisconnectAsync()
         {
-            _logger.LogInformation("Disconnecting WebSocket");
-
-            _disconnectTokenSource?.Cancel();
-
-            if (_webSocket?.State == WebSocketState.Open)
+            await _connectionLock.WaitAsync();
+            try
             {
-                try
+                if (_connectionState == WebSocketConnectionState.Disconnected || 
+                    _connectionState == WebSocketConnectionState.Failed)
                 {
-                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+                    return;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error closing WebSocket");
-                }
-            }
+                
+                _logger.LogInformation("Disconnecting WebSocket");
+                SetConnectionState(WebSocketConnectionState.Disconnecting, "User requested disconnect");
 
-            if (_receiveLoopTask != null)
+                // Cancel the receive loop
+                _disconnectTokenSource?.Cancel();
+                
+                // Stop ping timer
+                _pingTimer?.Dispose();
+                _pingTimer = null;
+
+                // Close the WebSocket connection gracefully
+                if (_webSocket?.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error closing WebSocket gracefully");
+                    }
+                }
+
+                // Wait for receive loop to complete
+                if (_receiveLoopTask != null)
+                {
+                    try
+                    {
+                        await _receiveLoopTask.ConfigureAwait(false);
+                    }
+                    catch { }
+                }
+
+                await CleanupConnection();
+                SetConnectionState(WebSocketConnectionState.Disconnected, "Disconnected successfully");
+            }
+            finally
             {
-                try
-                {
-                    await _receiveLoopTask;
-                }
-                catch { }
+                _connectionLock.Release();
             }
-
-            await CleanupConnection();
         }
 
         private async Task CleanupConnection()
         {
-            _subscribedInvoices.Clear();
-            _subscriptionToPaymentRequest.Clear();
-            _disconnectTokenSource?.Dispose();
-            _disconnectTokenSource = null;
-            _webSocket?.Dispose();
-            _webSocket = null;
-            _receiveLoopTask = null;
+            try
+            {
+                // Clear pending operations
+                foreach (var operation in _pendingOperations.Values)
+                {
+                    operation.TrySetCanceled();
+                }
+                _pendingOperations.Clear();
+                
+                // Clear subscriptions
+                _subscribedInvoices.Clear();
+                _subscriptionToPaymentRequest.Clear();
+                
+                // Dispose resources
+                _disconnectTokenSource?.Dispose();
+                _disconnectTokenSource = null;
+                
+                _pingTimer?.Dispose();
+                _pingTimer = null;
+                
+                if (_webSocket != null)
+                {
+                    _webSocket.Dispose();
+                    _webSocket = null;
+                }
+                
+                _receiveLoopTask = null;
+                
+                // Reset message ID counter for next connection
+                _messageId = 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during connection cleanup");
+            }
         }
 
         public void Dispose()
         {
-            _ = DisconnectAsync();
-            _sendLock?.Dispose();
+            try
+            {
+                // Use synchronous disconnect for disposal
+                if (_connectionState != WebSocketConnectionState.Disconnected)
+                {
+                    DisconnectAsync().GetAwaiter().GetResult();
+                }
+                
+                _sendLock?.Dispose();
+                _connectionLock?.Dispose();
+                _pingTimer?.Dispose();
+                _webSocket?.Dispose();
+                _disconnectTokenSource?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during disposal");
+            }
         }
     }
 }

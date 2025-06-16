@@ -99,6 +99,8 @@ type=flash;api=https://api.test.flashapp.me/graphql;api-token=YOUR_TOKEN
 - Real-time payment notifications
 - Reduced server load
 - Instant UI updates
+- Automatic reconnection with exponential backoff
+- Connection health monitoring
 
 ## Troubleshooting
 
@@ -233,7 +235,21 @@ docker-compose up
 
 ## Version History
 
-### v1.4.2 (Latest)
+### v1.5.1 (Latest)
+- Enhanced WebSocket stability with exponential backoff reconnection
+- Added connection state management to prevent duplicate connections
+- Implemented WebSocket health metrics and monitoring
+- Added ping/pong keep-alive mechanism
+- Improved error handling for abrupt disconnections
+- Created modular retry policy system
+- Fixed "remote party closed connection" errors
+
+### v1.5.0
+- Major UI cleanup for fresh rebuild
+- Temporarily removed UI elements for comprehensive redesign
+- Core Lightning functionality remains fully operational
+
+### v1.4.2
 - Critical: Made plugin domain-agnostic - now works on any BTCPay Server instance
 - Fixed hardcoded WebSocket endpoints - dynamically derived from API configuration
 - Fixed external link generation to use configured Flash instance

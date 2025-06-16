@@ -5,6 +5,49 @@ All notable changes to the BTCPayServer Flash Plugin will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2025-06-16
+
+### Added
+- Connection state management system to prevent duplicate WebSocket connections
+- WebSocket health metrics tracking (messages sent/received, errors, reconnect attempts)
+- Configurable exponential backoff retry policy with jitter
+- Active ping/pong keep-alive mechanism (30-second intervals)
+- Connection state change events for monitoring
+- Comprehensive connection cleanup on disposal
+
+### Fixed
+- Critical: "Remote party closed connection without completing handshake" errors
+- WebSocket reconnection storms causing server overload
+- Thread-safety issues with concurrent connection attempts
+- Resource leaks from improper WebSocket disposal
+- Graceful handling of abrupt disconnections
+
+### Changed
+- WebSocket service now uses state machine pattern for connection management
+- Reconnection logic uses exponential backoff (1s → 2s → 4s → ... → max 2min)
+- Added jitter to reconnection delays to prevent thundering herd
+- Improved error logging with contextual information
+- Enhanced resource management with proper disposal patterns
+
+### Technical Improvements
+- Created modular type system: WebSocketConnectionState, WebSocketRetryPolicy, WebSocketHealthMetrics
+- Implemented thread-safe operations using SemaphoreSlim locks
+- Added connection timeout handling (30-second default)
+- Improved separation of concerns with dedicated reconnection logic
+- Better error categorization and handling strategies
+
+## [1.5.0] - 2025-06-16
+
+### Changed
+- Major UI cleanup: Temporarily removed all menu and dashboard elements for comprehensive rebuild
+- Core Lightning functionality remains fully operational
+- Preparing for fresh UI implementation
+
+### Technical Notes
+- Backend services and payment processing unaffected
+- API and WebSocket functionality maintained
+- Database operations continue normally
+
 ## [1.4.2] - 2025-06-13
 
 ### Fixed
