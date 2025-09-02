@@ -10,7 +10,6 @@ Lightning Network plugin for BTCPayServer that integrates Flash wallet capabilit
 
 Get your API token from Flash mobile app: Settings → Developer → API Access
 
-## Features
 
 - ⚡ **Lightning Payments** - Zero-configuration Lightning node
 - 💵 **USD Wallet** - Accept payments in USD with automatic BTC conversion  
@@ -34,4 +33,8 @@ Get your API token from Flash mobile app: Settings → Developer → API Access
 
 ## License
 
+
 MIT License
+=======
+This plugin is released under the MIT License.
+
