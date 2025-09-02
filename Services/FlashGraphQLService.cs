@@ -52,39 +52,69 @@ namespace BTCPayServer.Plugins.Flash.Services
             _retryPolicy = FlashRetryPolicies.GetGraphQLRetryPolicy(_logger);
             _httpPolicy = FlashRetryPolicies.GetCombinedHttpPolicy(_logger);
 
-            // Create HttpClient with logging handler if logger factory is available
-            if (httpClient != null)
+            // Create base HTTP handler
+            var httpClientHandler = new HttpClientHandler();
+            
+            // For development/testing environments, bypass SSL certificate validation
+            if (endpoint.Host.Contains("test.flashapp.me"))
             {
-                _httpClient = httpClient;
+                _logger.LogWarning("[GraphQL Init] Development environment detected - bypassing SSL certificate validation for {Host}", endpoint.Host);
+                httpClientHandler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true;
             }
-            else if (_loggerFactory != null)
+            
+            // Create a custom delegating handler that ensures authorization is always set
+            var authHandler = new AuthorizationDelegatingHandler(_bearerToken, _logger);
+            authHandler.InnerHandler = httpClientHandler;
+            
+            // Create the final handler chain
+            HttpMessageHandler finalHandler;
+            if (_loggerFactory != null)
             {
                 var loggingHandler = new LoggingHttpMessageHandler(
                     _loggerFactory.CreateLogger<LoggingHttpMessageHandler>(),
-                    new HttpClientHandler());
-                _httpClient = new HttpClient(loggingHandler);
+                    authHandler);
+                finalHandler = loggingHandler;
             }
             else
             {
-                _httpClient = new HttpClient();
+                finalHandler = authHandler;
             }
-
-            // Configure authorization
-            _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            
+            // Create HttpClient for other uses if needed
+            if (httpClient != null)
+            {
+                // If an HttpClient was provided, use it but ensure headers are set
+                _httpClient = httpClient;
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            }
+            else
+            {
+                _httpClient = new HttpClient(finalHandler);
+                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            }
             
             // Log token info for debugging (first 10 chars only for security)
             _logger.LogInformation("[GraphQL Init] Endpoint: {Endpoint}, Token: {TokenPrefix}...", 
                 endpoint, 
                 _bearerToken.Length > 10 ? _bearerToken.Substring(0, 10) : "INVALID");
 
-            // Configure GraphQL client
+            // Configure GraphQL client with authorization directly in options
             var options = new GraphQLHttpClientOptions
             {
                 EndPoint = endpoint
             };
 
-            _graphQLClient = new GraphQLHttpClient(options, new NewtonsoftJsonSerializer(), _httpClient);
+            // Create an HttpClient with our handler chain for the GraphQL client
+            var graphQLHttpClient = new HttpClient(finalHandler);
+            graphQLHttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+
+            // Create the GraphQL client with our configured HttpClient
+            _graphQLClient = new GraphQLHttpClient(options, new NewtonsoftJsonSerializer(), graphQLHttpClient);
+            
+            // Log the HttpClient's default headers for debugging
+            _logger.LogInformation("[GraphQL Init] HttpClient configured with {HeaderCount} default headers", 
+                _httpClient.DefaultRequestHeaders.Count());
 
             _logger.LogInformation("[GraphQL Init] Flash GraphQL service initialized successfully");
             

@@ -18,6 +18,10 @@ build_property.GenerateRazorMetadataSourceChecksumAttributes =
 build_property.MSBuildProjectDirectory = /Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash
 build_property._RazorSourceGeneratorDebug = 
 
+[/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/FlashLNURL/TestLnurl.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3MvRmxhc2hMTlVSTC9UZXN0TG51cmwuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
 [/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/Views/_ViewImports.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3MvX1ZpZXdJbXBvcnRzLmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 

@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>BTCPayServer.Plugins.Flash</id>
+    <version>1.5.1</version>
+    <authors>BTCPayServer.Plugins.Flash</authors>
+    <description>Flash integration with LNURL and Lightning Address support</description>
+    <repository type="git" commit="01208641b3ebcb29bda1f83f5dbb6e87ee1b7880" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="BTCPayServer" version="2.1.1" exclude="Runtime,Build,Native,Analyzers,BuildTransitive" />
+        <dependency id="GraphQL.Client" version="6.0.2" exclude="Build,Analyzers" />
+        <dependency id="GraphQL.Client.Serializer.Newtonsoft" version="6.0.2" exclude="Build,Analyzers" />
+        <dependency id="LNURL" version="0.0.36" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.EntityFrameworkCore.InMemory" version="8.0.0" exclude="Build,Analyzers" />
+        <dependency id="Microsoft.Extensions.Http.Polly" version="8.0.0" exclude="Build,Analyzers" />
+        <dependency id="Polly" version="8.2.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <contentFiles>
+      <files include="any/net8.0/manifest.json" buildAction="Content" />
+    </contentFiles>
+  </metadata>
+  <files>
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/bin/Release/net8.0/BTCPayServer.Plugins.Flash.dll" target="lib/net8.0/BTCPayServer.Plugins.Flash.dll" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/manifest.json" target="content/manifest.json" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/manifest.json" target="contentFiles/any/net8.0/manifest.json" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/wwwroot/img/icons/flash.svg" target="staticwebassets/img/icons/flash.svg" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/staticwebassets/msbuild.BTCPayServer.Plugins.Flash.Microsoft.AspNetCore.StaticWebAssets.props" target="build/Microsoft.AspNetCore.StaticWebAssets.props" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/staticwebassets/msbuild.build.BTCPayServer.Plugins.Flash.props" target="build/BTCPayServer.Plugins.Flash.props" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/staticwebassets/msbuild.buildMultiTargeting.BTCPayServer.Plugins.Flash.props" target="buildMultiTargeting/BTCPayServer.Plugins.Flash.props" />
+    <file src="/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/obj/Release/net8.0/staticwebassets/msbuild.buildTransitive.BTCPayServer.Plugins.Flash.props" target="buildTransitive/BTCPayServer.Plugins.Flash.props" />
+  </files>
+</package>

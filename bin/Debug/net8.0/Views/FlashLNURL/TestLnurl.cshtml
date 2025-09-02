@@ -1,0 +1,21 @@
+@{
+    ViewData["Title"] = "Flash LNURL Test";
+}
+
+<div class="container">
+    <h2>Flash LNURL Test</h2>
+    <p>Test the LNURL generation for flashcards.</p>
+    
+    <form method="get" action="/plugins/@ViewContext.RouteData.Values["storeId"]/Flash/flashcard/test123/lnurl">
+        <button type="submit" class="btn btn-primary">Generate Test LNURL</button>
+    </form>
+    
+    <hr>
+    
+    <h3>Test LNURL Endpoints:</h3>
+    <ul>
+        <li><a href="/plugins/@ViewContext.RouteData.Values["storeId"]/Flash/.well-known/lnurlp/test123">LNURL Discovery</a></li>
+        <li><a href="/plugins/@ViewContext.RouteData.Values["storeId"]/Flash/lnurlp/test123/callback?amount=10000">LNURL Callback (10 sats)</a></li>
+        <li><a href="/plugins/@ViewContext.RouteData.Values["storeId"]/Flash/flashcard/test123/lnurl">Generate LNURL</a></li>
+    </ul>
+</div>

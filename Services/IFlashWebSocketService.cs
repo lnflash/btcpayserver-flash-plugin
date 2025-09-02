@@ -61,6 +61,28 @@ namespace BTCPayServer.Plugins.Flash.Services
         /// Unsubscribe from updates for a specific invoice
         /// </summary>
         Task UnsubscribeFromInvoiceUpdatesAsync(string invoiceId, CancellationToken cancellation = default);
+        
+        /// <summary>
+        /// Create an invoice via WebSocket GraphQL mutation
+        /// </summary>
+        /// <param name="amountSats">Amount in satoshis</param>
+        /// <param name="description">Invoice description/memo</param>
+        /// <param name="cancellation">Cancellation token</param>
+        /// <returns>Invoice data including payment request, payment hash, etc.</returns>
+        Task<InvoiceCreationResult?> CreateInvoiceAsync(long amountSats, string description, CancellationToken cancellation = default);
+    }
+    
+    /// <summary>
+    /// Result from invoice creation via WebSocket
+    /// </summary>
+    public class InvoiceCreationResult
+    {
+        public string PaymentHash { get; set; } = string.Empty;
+        public string PaymentRequest { get; set; } = string.Empty;
+        public string? PaymentSecret { get; set; }
+        public long Satoshis { get; set; }
+        public string? ErrorMessage { get; set; }
+        public bool Success { get; set; }
     }
 
     /// <summary>

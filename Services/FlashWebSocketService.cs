@@ -29,7 +29,7 @@ namespace BTCPayServer.Plugins.Flash.Services
         private readonly Dictionary<string, string> _subscriptionToPaymentRequest = new();
         private string? _bearerToken;
         private Uri? _wsEndpoint;
-        private readonly Dictionary<string, TaskCompletionSource<bool>> _pendingOperations = new();
+        private readonly Dictionary<string, object> _pendingOperations = new();
         private int _messageId = 0;
         private int _reconnectAttempt = 0;
         private readonly WebSocketRetryPolicy _retryPolicy;
@@ -113,6 +113,14 @@ namespace BTCPayServer.Plugins.Flash.Services
                 _webSocket = new ClientWebSocket();
                 _webSocket.Options.AddSubProtocol("graphql-ws");
                 _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                
+                // For development/testing environments, bypass SSL certificate validation
+                // This should only be used for testing with test.flashapp.me
+                if (_wsEndpoint?.Host?.Contains("test.flashapp.me") == true)
+                {
+                    _logger.LogWarning("[WebSocket Init] Development environment detected - bypassing SSL certificate validation for {Host}", _wsEndpoint.Host);
+                    _webSocket.Options.RemoteCertificateValidationCallback = (sender, cert, chain, sslPolicyErrors) => true;
+                }
                 
                 // Add Authorization header to the WebSocket handshake
                 _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {_bearerToken}");
@@ -290,7 +298,22 @@ namespace BTCPayServer.Plugins.Flash.Services
             }
 
             var messageJson = JsonConvert.SerializeObject(initMessage);
-            _logger.LogInformation("Sending connection_init with protocol {Protocol}: {Message}", negotiatedProtocol, messageJson);
+            
+            // Log connection_init without exposing the full token
+            var safeMessage = messageJson;
+            if (messageJson.Contains("Bearer"))
+            {
+                // Mask the token for logging - show only first 10 chars
+                safeMessage = System.Text.RegularExpressions.Regex.Replace(
+                    messageJson, 
+                    @"Bearer\s+([\w\-_]+)", 
+                    m => {
+                        var token = m.Groups[1].Value;
+                        return $"Bearer {token.Substring(0, Math.Min(10, token.Length))}...";
+                    }
+                );
+            }
+            _logger.LogInformation("Sending connection_init with protocol {Protocol}: {Message}", negotiatedProtocol, safeMessage);
             await SendMessageAsync(messageJson, cancellation);
         }
 
@@ -379,6 +402,100 @@ namespace BTCPayServer.Plugins.Flash.Services
             _subscribedInvoices.Remove(invoiceId);
 
             _logger.LogInformation("Unsubscribed from updates for invoice {InvoiceId}", invoiceId);
+        }
+        
+        public async Task<InvoiceCreationResult?> CreateInvoiceAsync(long amountSats, string description, CancellationToken cancellation = default)
+        {
+            if (!IsConnected)
+            {
+                _logger.LogError("[WebSocket] Cannot create invoice: WebSocket not connected");
+                return new InvoiceCreationResult 
+                { 
+                    Success = false, 
+                    ErrorMessage = "WebSocket not connected" 
+                };
+            }
+
+            try
+            {
+                _logger.LogInformation("[WebSocket] Creating invoice via WebSocket: {AmountSats} sats, Description: {Description}", 
+                    amountSats, description);
+
+                var mutationId = $"mutation_{++_messageId}";
+                var tcs = new TaskCompletionSource<InvoiceCreationResult>();
+                _pendingOperations[mutationId] = tcs;
+
+                // Build the GraphQL mutation message for WebSocket
+                var mutationMessage = new
+                {
+                    id = mutationId,
+                    type = "subscribe", // GraphQL over WebSocket uses "subscribe" type even for mutations
+                    payload = new
+                    {
+                        query = @"
+                            mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
+                                lnInvoiceCreate(input: $input) {
+                                    invoice {
+                                        paymentHash
+                                        paymentRequest
+                                        paymentSecret
+                                        satoshis
+                                    }
+                                    errors {
+                                        message
+                                    }
+                                }
+                            }",
+                        variables = new
+                        {
+                            input = new
+                            {
+                                amount = amountSats,
+                                memo = description ?? "Payment"
+                            }
+                        }
+                    }
+                };
+
+                var messageJson = JsonConvert.SerializeObject(mutationMessage);
+                _logger.LogDebug("[WebSocket] Sending invoice creation mutation: {Message}", messageJson);
+                
+                await SendMessageAsync(messageJson, cancellation);
+                
+                // Wait for response with timeout
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
+                
+                try
+                {
+                    var result = await tcs.Task.WaitAsync(cts.Token);
+                    _logger.LogInformation("[WebSocket] Invoice created successfully: PaymentHash={PaymentHash}, Success={Success}", 
+                        result.PaymentHash, result.Success);
+                    return result;
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogError("[WebSocket] Invoice creation timed out");
+                    return new InvoiceCreationResult 
+                    { 
+                        Success = false, 
+                        ErrorMessage = "Request timed out" 
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[WebSocket] Error creating invoice via WebSocket");
+                return new InvoiceCreationResult 
+                { 
+                    Success = false, 
+                    ErrorMessage = ex.Message 
+                };
+            }
+            finally
+            {
+                _pendingOperations.Remove($"mutation_{_messageId}");
+            }
         }
 
         private void StartPingTimer()
@@ -511,25 +628,70 @@ namespace BTCPayServer.Plugins.Flash.Services
                 var messageType = json["type"]?.ToString();
                 var messageId = json["id"]?.ToString();
 
-                _logger.LogDebug("Processing message type: {Type}, id: {Id}", messageType, messageId);
+                _logger.LogDebug("Processing message type: {Type}, id: {Id}, full message: {Message}", 
+                    messageType, messageId, message);
 
                 switch (messageType)
                 {
                     case "connection_ack":
                         _logger.LogInformation("Received connection_ack from Flash WebSocket");
-                        if (_pendingOperations.TryGetValue("connection_ack", out var ackTcs))
+                        if (_pendingOperations.TryGetValue("connection_ack", out var ackTcsObj))
                         {
-                            ackTcs.SetResult(true);
+                            var ackTcs = ackTcsObj as TaskCompletionSource<bool>;
+                            ackTcs?.SetResult(true);
                         }
                         break;
 
                     case "next":
-                        ProcessSubscriptionData(json);
+                        // Check if this is a mutation response
+                        if (messageId != null && messageId.StartsWith("mutation_"))
+                        {
+                            _logger.LogDebug("[WebSocket] Processing mutation response for {MessageId}: {Response}", 
+                                messageId, json.ToString());
+                            ProcessMutationResponse(json);
+                        }
+                        else
+                        {
+                            ProcessSubscriptionData(json);
+                        }
                         break;
 
                     case "error":
-                        var errors = json["payload"]?["errors"] ?? json["payload"];
-                        _logger.LogError("WebSocket error: {Error}", errors?.ToString());
+                        var errorPayload = json["payload"];
+                        if (errorPayload != null)
+                        {
+                            // Handle both array and object error formats
+                            JToken errors = null;
+                            if (errorPayload.Type == JTokenType.Array)
+                            {
+                                // If payload is an array, it's likely an array of errors
+                                errors = errorPayload;
+                            }
+                            else if (errorPayload.Type == JTokenType.Object)
+                            {
+                                // If payload is an object, look for errors property
+                                errors = errorPayload["errors"] ?? errorPayload;
+                            }
+                            else
+                            {
+                                errors = errorPayload;
+                            }
+                            
+                            _logger.LogError("WebSocket error: {Error}", errors?.ToString());
+                            
+                            // Check if this is a mutation error response
+                            if (messageId != null && messageId.StartsWith("mutation_") && 
+                                _pendingOperations.TryGetValue(messageId, out var tcsObj))
+                            {
+                                var tcs = tcsObj as TaskCompletionSource<InvoiceCreationResult>;
+                                var errorMessage = errors?.ToString() ?? "Unknown WebSocket error";
+                                tcs?.SetResult(new InvoiceCreationResult
+                                {
+                                    Success = false,
+                                    ErrorMessage = errorMessage
+                                });
+                            }
+                        }
                         break;
 
                     case "complete":
@@ -568,6 +730,108 @@ namespace BTCPayServer.Plugins.Flash.Services
             }
         }
 
+        private void ProcessMutationResponse(JObject message)
+        {
+            try
+            {
+                var messageId = message["id"]?.ToString();
+                if (messageId == null || !_pendingOperations.TryGetValue(messageId, out var tcsObj))
+                {
+                    _logger.LogWarning("[WebSocket] Received mutation response for unknown ID: {MessageId}", messageId);
+                    return;
+                }
+
+                var tcs = tcsObj as TaskCompletionSource<InvoiceCreationResult>;
+                if (tcs == null)
+                {
+                    _logger.LogWarning("[WebSocket] Pending operation is not an InvoiceCreationResult TCS");
+                    return;
+                }
+
+                // Check for GraphQL errors first
+                var payloadErrors = message["payload"]?["errors"];
+                if (payloadErrors != null && payloadErrors.HasValues)
+                {
+                    var errorMessage = payloadErrors[0]?["message"]?.ToString() ?? "Unknown GraphQL error";
+                    _logger.LogError("[WebSocket] GraphQL error in mutation response: {Error}", errorMessage);
+                    tcs.SetResult(new InvoiceCreationResult
+                    {
+                        Success = false,
+                        ErrorMessage = errorMessage
+                    });
+                    return;
+                }
+
+                // Now check the mutation response structure
+                var data = message["payload"]?["data"]?["lnInvoiceCreate"];
+                if (data == null)
+                {
+                    _logger.LogError("[WebSocket] No lnInvoiceCreate data in mutation response");
+                    tcs.SetResult(new InvoiceCreationResult
+                    {
+                        Success = false,
+                        ErrorMessage = "No lnInvoiceCreate data in response"
+                    });
+                    return;
+                }
+                
+                // Check for application-level errors in the response
+                var applicationErrors = data["errors"];
+                if (applicationErrors != null && applicationErrors.HasValues)
+                {
+                    var errorMessage = applicationErrors[0]?["message"]?.ToString() ?? "Unknown application error";
+                    _logger.LogError("[WebSocket] Application error in invoice creation: {Error}", errorMessage);
+                    tcs.SetResult(new InvoiceCreationResult
+                    {
+                        Success = false,
+                        ErrorMessage = errorMessage
+                    });
+                    return;
+                }
+
+                // Extract the invoice data
+                var invoiceData = data["invoice"];
+                if (invoiceData == null)
+                {
+                    _logger.LogError("[WebSocket] No invoice data in lnInvoiceCreate response");
+                    tcs.SetResult(new InvoiceCreationResult
+                    {
+                        Success = false,
+                        ErrorMessage = "No invoice data in response"
+                    });
+                    return;
+                }
+
+                var result = new InvoiceCreationResult
+                {
+                    PaymentHash = invoiceData["paymentHash"]?.ToString() ?? string.Empty,
+                    PaymentRequest = invoiceData["paymentRequest"]?.ToString() ?? string.Empty,
+                    PaymentSecret = invoiceData["paymentSecret"]?.ToString(),
+                    Satoshis = invoiceData["satoshis"]?.Value<long>() ?? 0,
+                    Success = true
+                };
+
+                _logger.LogInformation("[WebSocket] Invoice created successfully via mutation: PaymentHash={PaymentHash}, Amount={Amount} sats", 
+                    result.PaymentHash, result.Satoshis);
+                tcs.SetResult(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[WebSocket] Error processing mutation response: {Message}", message.ToString());
+                
+                var messageId = message["id"]?.ToString();
+                if (messageId != null && _pendingOperations.TryGetValue(messageId, out var tcsObj))
+                {
+                    var tcs = tcsObj as TaskCompletionSource<InvoiceCreationResult>;
+                    tcs?.SetResult(new InvoiceCreationResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"Error processing response: {ex.Message}"
+                    });
+                }
+            }
+        }
+        
         private void ProcessSubscriptionData(JObject message)
         {
             try
@@ -679,7 +943,14 @@ namespace BTCPayServer.Plugins.Flash.Services
                 // Clear pending operations
                 foreach (var operation in _pendingOperations.Values)
                 {
-                    operation.TrySetCanceled();
+                    if (operation is TaskCompletionSource<bool> boolTcs)
+                    {
+                        boolTcs.TrySetCanceled();
+                    }
+                    else if (operation is TaskCompletionSource<InvoiceCreationResult> invoiceTcs)
+                    {
+                        invoiceTcs.TrySetCanceled();
+                    }
                 }
                 _pendingOperations.Clear();
                 

@@ -43,6 +43,7 @@ namespace BTCPayServer.Plugins.Flash
         private readonly IGraphQLClient _graphQLClient;
         private readonly ILogger<FlashLightningClient> _logger;
         private readonly string _bearerToken;
+        private readonly Uri _endpoint;
         private string? _cachedWalletId;
         private string? _cachedWalletCurrency;
 
@@ -151,6 +152,7 @@ namespace BTCPayServer.Plugins.Flash
             ILoggerFactory? loggerFactory = null)
         {
             _bearerToken = bearerToken ?? throw new ArgumentNullException(nameof(bearerToken));
+            _endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             
             _logger.LogInformation("[FLASH INIT] Initializing Flash Lightning Client - Endpoint: {Endpoint}, Token Length: {TokenLength}",
@@ -564,7 +566,46 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
-                // Delegate to the invoice service
+                // For simple invoice creation (like LNURL), try WebSocket first (works with Ory tokens)
+                if (createParams?.Amount != null && !string.IsNullOrEmpty(createParams.Description))
+                {
+                    var amountSats = createParams.Amount.ToUnit(LightMoneyUnit.Satoshi);
+                    
+                    // === Use HTTP for invoice creation (WebSocket only supports subscriptions) ===
+                    try
+                    {
+                        _logger.LogInformation("=== Using HTTP with FlashSimpleInvoiceService ===");
+                        
+                        var simpleService = new Services.FlashSimpleInvoiceService(
+                            _bearerToken,
+                            _endpoint,
+                            _logger);
+                        
+                        var simpleInvoice = await simpleService.CreateInvoiceAsync(
+                            (long)amountSats,
+                            createParams.Description,
+                            cancellation);
+                        
+                        _logger.LogInformation($"=== Successfully created invoice via FlashSimpleInvoiceService: {simpleInvoice.Id} ===");
+                        
+                        // Dispose of the service
+                        simpleService.Dispose();
+                        
+                        // Track the invoice to enable WebSocket subscriptions
+                        if (simpleInvoice != null)
+                        {
+                            TrackPendingInvoice(simpleInvoice);
+                        }
+                        
+                        return simpleInvoice;
+                    }
+                    catch (Exception simpleEx)
+                    {
+                        _logger.LogWarning(simpleEx, "Failed to use FlashSimpleInvoiceService, falling back to standard service");
+                    }
+                }
+                
+                // Final fallback to standard service
                 var invoice = await _invoiceService.CreateInvoiceAsync(createParams, cancellation);
                 
                 // Track the invoice to enable WebSocket subscriptions
@@ -585,16 +626,66 @@ namespace BTCPayServer.Plugins.Flash
         // Overload for standard CreateInvoice
         public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default)
         {
-            // Delegate to the invoice service
-            var invoice = await _invoiceService.CreateInvoiceAsync(amount, description, expiry, cancellation);
+            var amountSats = amount.ToUnit(LightMoneyUnit.Satoshi);
             
-            // Track the invoice to enable WebSocket subscriptions
-            if (invoice != null)
+            // === Use HTTP for invoice creation (WebSocket only supports subscriptions) ===
+            try
             {
-                TrackPendingInvoice(invoice);
+                _logger.LogInformation("=== Using HTTP with FlashSimpleInvoiceService (overload) ===");
+                
+                var simpleService = new Services.FlashSimpleInvoiceService(
+                    _bearerToken,
+                    _endpoint,
+                    _logger);
+                
+                var simpleInvoice = await simpleService.CreateInvoiceAsync(
+                    (long)amountSats,
+                    description,
+                    cancellation);
+                
+                _logger.LogInformation($"=== Successfully created invoice via FlashSimpleInvoiceService: {simpleInvoice.Id} ===");
+                
+                // Dispose of the service
+                simpleService.Dispose();
+                
+                // Track the invoice to enable WebSocket subscriptions for payment notifications
+                if (simpleInvoice != null)
+                {
+                    TrackPendingInvoice(simpleInvoice);
+                    
+                    // Ensure WebSocket is connected for payment notifications
+                    if (!_webSocketService.IsConnected)
+                    {
+                        try
+                        {
+                            _logger.LogInformation("Connecting WebSocket for payment notifications");
+                            var wsEndpoint = new Uri(_endpoint.ToString().Replace("https://", "wss://").Replace("http://", "ws://"));
+                            await _webSocketService.ConnectAsync(_bearerToken, wsEndpoint, cancellation);
+                        }
+                        catch (Exception wsEx)
+                        {
+                            _logger.LogWarning(wsEx, "Failed to connect WebSocket for payment notifications");
+                        }
+                    }
+                }
+                
+                return simpleInvoice;
             }
-            
-            return invoice;
+            catch (Exception simpleEx)
+            {
+                _logger.LogWarning(simpleEx, "Failed to use FlashSimpleInvoiceService (overload), falling back to standard service");
+                
+                // Final fallback to the invoice service
+                var invoice = await _invoiceService.CreateInvoiceAsync(amount, description, expiry, cancellation);
+                
+                // Track the invoice to enable WebSocket subscriptions for payment notifications
+                if (invoice != null)
+                {
+                    TrackPendingInvoice(invoice);
+                }
+                
+                return invoice;
+            }
         }
 
         public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = default)
