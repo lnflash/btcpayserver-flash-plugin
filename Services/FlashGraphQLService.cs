@@ -598,20 +598,21 @@ namespace BTCPayServer.Plugins.Flash.Services
                     // This is a workaround since Flash doesn't provide direct payment hash lookup
                     var mostRecent = recentPayments.First();
                     
-                    // Convert USD cents to satoshis if this is a USD wallet
+                    // Convert USD to satoshis if this is a USD wallet
                     decimal? amountInSats = mostRecent.SettlementAmount;
                     if (isUsdWallet && amountInSats.HasValue)
                     {
-                        // Get exchange rate and convert USD cents to satoshis
+                        // Get exchange rate and convert USD to satoshis
+                        // Note: Flash API returns settlementAmount in USD (not cents) for USD wallets
                         var exchangeRate = await GetExchangeRateAsync(cancellation);
                         if (exchangeRate > 0)
                         {
-                            decimal usdAmount = amountInSats.Value / 100m; // Convert cents to USD
+                            decimal usdAmount = amountInSats.Value; // Already in USD, not cents
                             decimal btcAmount = usdAmount / exchangeRate; // Convert USD to BTC
                             amountInSats = btcAmount * 100_000_000m; // Convert BTC to satoshis
                             amountInSats = Math.Round(amountInSats.Value, 0); // Round to whole satoshis
                             
-                            _logger.LogInformation("[INVOICE STATUS] Converted {UsdCents} USD cents to {Sats} satoshis using rate {Rate}", 
+                            _logger.LogInformation("[INVOICE STATUS] Converted {Usd} USD to {Sats} satoshis using rate {Rate}", 
                                 mostRecent.SettlementAmount, amountInSats, exchangeRate);
                         }
                     }
