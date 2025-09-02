@@ -1,9 +1,10 @@
 {
   "identifier": "BTCPayServer.Plugins.Flash",
-  "name": "Flash Lightning",
-  "version": "1.0.0",
-  "description": "Integration with Flash Lightning Network wallet.",
-  "url": "https://github.com/lnflash/btcpayserver-flash-plugin",
+  "name": "Flash",
+  "version": "1.5.2",
+  "description": "Integration with Flash Lightning Network wallet with full LNURL payment support, Lightning Address capability, enhanced payouts handling, and dedicated Boltcard topup.",
+  "source": "https://github.com/lnflash/btcpayserver-flash-plugin",
+  "documentation": "https://docs.flashapp.me/plugin",
   "author": "Flash",
   "systemPlugin": false,
   "dependencies": [

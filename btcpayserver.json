@@ -1,0 +1,11 @@
+{
+  "Version": "1.4.2",
+  "Name": "Flash Plugin",
+  "Description": "Flash Lightning Network Integration for BTCPayServer",
+  "Authors": [
+    "Flash Team"
+  ],
+  "Dependencies": ["BTCPayServer.Plugins.NFC"],
+  "Source": "https://github.com/Island-Bitcoin/BTCPayServer.Plugins.Flash",
+  "Documentation": "https://github.com/Island-Bitcoin/BTCPayServer.Plugins.Flash#readme"
+}

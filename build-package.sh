@@ -23,10 +23,16 @@ cp bin/Release/publish/*.json $PACKAGE_DIR/
 cp manifest.json $PACKAGE_DIR/
 cp manifest.json $PACKAGE_DIR/BTCPayServer.Plugins.Flash.json
 
-# Copy Views files correctly
-mkdir -p $PACKAGE_DIR/Views/Shared/Flash
-cp Views/Shared/Flash/LNPaymentMethodSetupTab.cshtml $PACKAGE_DIR/Views/Shared/Flash/
-cp _ViewImports.cshtml $PACKAGE_DIR/
+# Copy Views files if they exist
+# Currently no views are included as the UI has been removed for rebuild
+if [ -f "_ViewImports.cshtml" ]; then
+    cp _ViewImports.cshtml $PACKAGE_DIR/
+fi
+
+# Copy any remaining view files if needed
+if [ -d "Views" ] && [ "$(ls -A Views)" ]; then
+    cp -r Views $PACKAGE_DIR/
+fi
 
 # Create the BTCPay plugin package
 cd bin/Release

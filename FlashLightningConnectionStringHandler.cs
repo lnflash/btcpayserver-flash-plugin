@@ -1,16 +1,19 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using System.Threading;
 
 namespace BTCPayServer.Plugins.Flash
 {
     public class FlashLightningConnectionStringHandler : ILightningConnectionStringHandler
     {
         private readonly ILoggerFactory _loggerFactory;
+        private readonly ConcurrentDictionary<string, ILightningClient> _clientCache = new();
 
         public FlashLightningConnectionStringHandler(ILoggerFactory loggerFactory)
         {
@@ -37,12 +40,30 @@ namespace BTCPayServer.Plugins.Flash
 
             try
             {
+                // Check cache first
+                if (_clientCache.TryGetValue(connectionString, out var cachedClient))
+                {
+                    error = null;
+                    _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                        .LogDebug("Returning cached Flash Lightning client for connection string");
+                    return cachedClient;
+                }
+
                 var flashConnectionString = Parse(connectionString);
                 error = null;
-                return new FlashLightningClient(
+                var client = new FlashLightningClient(
                     flashConnectionString.BearerToken,
                     new Uri(flashConnectionString.Endpoint),
-                    _loggerFactory.CreateLogger<FlashLightningClient>());
+                    _loggerFactory.CreateLogger<FlashLightningClient>(),
+                    httpClient: null,
+                    loggerFactory: _loggerFactory);
+                
+                // Cache the client
+                _clientCache.TryAdd(connectionString, client);
+                _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                    .LogInformation("Created and cached new Flash Lightning client for connection string");
+                
+                return client;
             }
             catch (Exception ex)
             {
@@ -60,11 +81,75 @@ namespace BTCPayServer.Plugins.Flash
             if (!CanHandle(connectionString))
                 throw new ArgumentException("Invalid connection string", nameof(connectionString));
 
+            // Check cache first
+            if (_clientCache.TryGetValue(connectionString, out var cachedClient))
+            {
+                _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                    .LogDebug("Returning cached Flash Lightning client for connection string (obsolete method)");
+                return cachedClient;
+            }
+
             var flashConnectionString = Parse(connectionString);
-            return new FlashLightningClient(
+            var client = new FlashLightningClient(
                 flashConnectionString.BearerToken,
                 new Uri(flashConnectionString.Endpoint),
-                _loggerFactory.CreateLogger<FlashLightningClient>());
+                _loggerFactory.CreateLogger<FlashLightningClient>(),
+                httpClient: null,
+                loggerFactory: _loggerFactory);
+            
+            // Cache the client
+            _clientCache.TryAdd(connectionString, client);
+            _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                .LogInformation("Created and cached new Flash Lightning client for connection string (obsolete method)");
+            
+            return client;
+        }
+
+        public async Task<object> GetLightningClient(string connectionString, BTCPayNetwork network, CancellationToken cancellation)
+        {
+            if (connectionString == null)
+                throw new ArgumentNullException(nameof(connectionString));
+
+            if (!CanHandle(connectionString))
+                throw new ArgumentException("Invalid connection string", nameof(connectionString));
+
+            try
+            {
+                // Check cache first
+                if (_clientCache.TryGetValue(connectionString, out var cachedClient))
+                {
+                    _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                        .LogDebug("Returning cached Flash Lightning client for connection string (async method)");
+                    // Still verify it works
+                    await cachedClient.GetInfo(cancellation);
+                    return cachedClient;
+                }
+
+                var flashConnectionString = Parse(connectionString);
+                var client = new FlashLightningClient(
+                    flashConnectionString.BearerToken,
+                    new Uri(flashConnectionString.Endpoint),
+                    _loggerFactory.CreateLogger<FlashLightningClient>(),
+                    httpClient: null,
+                    loggerFactory: _loggerFactory);
+
+                // Verify the connection works by calling GetInfo
+                await client.GetInfo(cancellation);
+
+                // Cache the client after successful verification
+                _clientCache.TryAdd(connectionString, client);
+                _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                    .LogInformation("Created and cached new Flash Lightning client for connection string (async method)");
+
+                // Return the client instance directly
+                return client;
+            }
+            catch (Exception ex)
+            {
+                _loggerFactory.CreateLogger<FlashLightningConnectionStringHandler>()
+                    .LogError(ex, "Error creating Flash Lightning client");
+                throw;
+            }
         }
 
         public Task<object> GetLightningNodeDashboardInfo(string connectionString, BTCPayNetwork network)
@@ -125,6 +210,26 @@ namespace BTCPayServer.Plugins.Flash
 
         public string GetExternalLink(string connectionString, BTCPayNetwork network)
         {
+            try
+            {
+                var parsed = Parse(connectionString);
+                if (parsed.Endpoint != null && !string.IsNullOrEmpty(parsed.Endpoint))
+                {
+                    var uri = new Uri(parsed.Endpoint);
+                    // Transform API URL to main website URL
+                    var host = uri.Host;
+                    if (host.StartsWith("api.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        host = host.Substring(4); // Remove "api." prefix
+                    }
+                    return $"{uri.Scheme}://{host}";
+                }
+            }
+            catch
+            {
+                // Fallback to default if parsing fails
+            }
+            
             return "https://flashapp.me";
         }
 

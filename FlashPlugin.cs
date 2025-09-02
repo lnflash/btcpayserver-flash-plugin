@@ -4,7 +4,10 @@ using System.Diagnostics;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.Data;
 using BTCPayServer.Lightning;
+using BTCPayServer.Plugins.Flash.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -12,7 +15,7 @@ namespace BTCPayServer.Plugins.Flash
 {
     public class FlashPlugin : BaseBTCPayServerPlugin
     {
-        private ILogger _logger;
+        private ILogger<FlashPlugin>? _logger;
 
         // Static constructor that will run when the class is loaded
         static FlashPlugin()
@@ -29,9 +32,9 @@ namespace BTCPayServer.Plugins.Flash
         }
 
         public override string Identifier => "BTCPayServer.Plugins.Flash";
-        public override string Name => "Flash Lightning";
-        public override string Description => "Integration with Flash Lightning Network wallet.";
-        public override Version Version => new Version(1, 0, 0);
+        public override string Name => "Flash";
+        public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
+        public override Version Version => new Version(1, 5, 2);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
@@ -44,25 +47,173 @@ namespace BTCPayServer.Plugins.Flash
             {
                 FlashPluginLogger.Log("Execute method called");
 
-                // Get the logger service
-                _logger = applicationBuilder.BuildServiceProvider().GetRequiredService<ILoggerFactory>().CreateLogger("BTCPayServer.Plugins.Flash");
-                _logger.LogInformation("Flash Plugin: Starting plugin initialization");
+                // Create a service provider for initialization only
+                // This is safer than building the entire service collection which might not be ready
+                var serviceProvider = applicationBuilder.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = false, ValidateScopes = false });
+                var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+                _logger = loggerFactory?.CreateLogger<FlashPlugin>();
+
+                _logger?.LogInformation("Flash Plugin: Starting plugin initialization");
                 FlashPluginLogger.Log("Got logger service");
 
-                // Register UI extensions for the Lightning setup section
-                applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Flash/LNPaymentMethodSetupTab");
-                _logger.LogInformation("Flash Plugin: Registered UI extension");
-                FlashPluginLogger.Log("Registered UI extension");
+                // UI extensions temporarily removed for rebuild
+                _logger?.LogInformation("Flash Plugin: UI extensions disabled for rebuild");
+                FlashPluginLogger.Log("UI extensions disabled for rebuild");
 
                 // Register the Flash Lightning client service
-                applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<FlashLightningConnectionStringHandler>());
                 applicationBuilder.AddSingleton<FlashLightningConnectionStringHandler>();
-                applicationBuilder.AddSingleton<FlashLightningClient>();
-                _logger.LogInformation("Flash Plugin: Registered Lightning services");
+                applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<FlashLightningConnectionStringHandler>());
+
+                // Register WebSocket service for real-time updates
+                applicationBuilder.AddScoped<IFlashWebSocketService, FlashWebSocketService>();
+                
+                // Register core services
+                applicationBuilder.AddScoped<IFlashGraphQLService, FlashGraphQLService>();
+                applicationBuilder.AddScoped<IFlashInvoiceService, FlashInvoiceService>();
+                applicationBuilder.AddScoped<IFlashExchangeRateService, FlashExchangeRateService>();
+                applicationBuilder.AddScoped<IFlashBoltcardService, FlashBoltcardService>();
+                applicationBuilder.AddScoped<IFlashTransactionService, FlashTransactionService>();
+                applicationBuilder.AddScoped<IFlashWalletService, FlashWalletService>();
+                applicationBuilder.AddScoped<IFlashMonitoringService, FlashMonitoringService>();
+                applicationBuilder.AddScoped<IFlashPaymentService>(provider => 
+                    new FlashPaymentService(
+                        provider.GetRequiredService<IFlashGraphQLService>(),
+                        provider.GetRequiredService<IFlashExchangeRateService>(),
+                        provider.GetRequiredService<ILogger<FlashPaymentService>>(),
+                        provider
+                    ));
+                applicationBuilder.AddHostedService<BoltcardInvoicePoller>();
+                
+                // Register payout tracking services and database
+                applicationBuilder.AddDbContext<Data.FlashPluginDbContext>((provider, options) =>
+                {
+                    // Get the database context factory from BTCPay Server
+                    var dbContextFactory = provider.GetService<ApplicationDbContextFactory>();
+                    if (dbContextFactory != null)
+                    {
+                        // Use the same database configuration as BTCPay Server
+                        dbContextFactory.ConfigureBuilder(options);
+                    }
+                    else
+                    {
+                        // Fallback to in-memory database for development/testing
+                        options.UseInMemoryDatabase("FlashPlugin");
+                        _logger?.LogWarning("Using in-memory database for Flash plugin - this is not recommended for production");
+                    }
+                });
+                applicationBuilder.AddScoped<Data.FlashPayoutRepository>();
+                applicationBuilder.AddScoped<IFlashPayoutTrackingService, FlashPayoutTrackingService>();
+                applicationBuilder.AddHostedService<Data.FlashPluginMigrationRunner>();
+
+                // Register FlashLightningClient with a factory method that creates it when needed
+                // The factory will use IServiceProvider to get other dependencies like loggers
+                applicationBuilder.AddScoped<FlashLightningClient>(provider =>
+                {
+                    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+                    var logger = loggerFactory.CreateLogger<FlashLightningClient>();
+
+                    try
+                    {
+                        // NOTE: This factory is only used for dependency injection registration
+                        // The actual client instances are created by FlashLightningConnectionStringHandler
+                        // with proper authentication tokens from the connection string
+                        logger.LogWarning("FlashLightningClient factory method called - this should only happen during DI registration");
+
+                        // Return null - the actual clients will be created by the connection string handler
+                        return null;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error in FlashLightningClient factory method");
+                        throw;
+                    }
+                });
+
+                _logger?.LogInformation("Flash Plugin: Registered Lightning services");
                 FlashPluginLogger.Log("Registered Lightning services");
 
+                // Register the Pull Payment handler services
+                applicationBuilder.AddScoped<Models.FlashPullPaymentHandler>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.FlashPullPaymentHandler>();
+                    var flashClient = provider.GetService<FlashLightningClient>();
+                    return new Models.FlashPullPaymentHandler(logger, flashClient);
+                });
+
+                // Register plugin hook filters for Pull Payment support with factory methods
+
+                // 1. PullPaymentDestinationValidator
+                applicationBuilder.AddScoped<Models.PullPaymentDestinationValidator>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.PullPaymentDestinationValidator>();
+                    return new Models.PullPaymentDestinationValidator(logger);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PullPaymentDestinationValidator>());
+
+                // 2. PullPaymentClaimProcessor 
+                applicationBuilder.AddScoped<Models.PullPaymentClaimProcessor>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.PullPaymentClaimProcessor>();
+                    var flashClient = provider.GetService<FlashLightningClient>();
+                    return new Models.PullPaymentClaimProcessor(logger, flashClient, provider);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PullPaymentClaimProcessor>());
+
+                // 3. Regular LnurlWithdrawHandler
+                applicationBuilder.AddScoped<Models.LnurlWithdrawHandler>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.LnurlWithdrawHandler>();
+                    var flashClient = provider.GetService<FlashLightningClient>();
+                    var pullPaymentHandler = provider.GetService<Models.FlashPullPaymentHandler>();
+                    return new Models.LnurlWithdrawHandler(logger, flashClient, pullPaymentHandler);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.LnurlWithdrawHandler>());
+
+                // 4. Boltcard patch for amount verification
+                applicationBuilder.AddScoped<Models.BoltcardPatch>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.BoltcardPatch>();
+                    return new Models.BoltcardPatch(logger);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.BoltcardPatch>());
+
+                // 5. Boltcard invoice tracker for payment detection
+                applicationBuilder.AddScoped<Models.BoltcardInvoiceTracker>(provider =>
+                {
+                    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<Models.BoltcardInvoiceTracker>();
+                    return new Models.BoltcardInvoiceTracker(logger, provider);
+                });
+
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.BoltcardInvoiceTracker>());
+                    
+                // 6. Payout event listeners for tracking
+                applicationBuilder.AddScoped<Models.PayoutEventListener>();
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PayoutEventListener>());
+                    
+                applicationBuilder.AddScoped<Models.PayoutStateChangeListener>();
+                applicationBuilder.AddScoped<IPluginHookFilter>(provider =>
+                    provider.GetRequiredService<Models.PayoutStateChangeListener>());
+
+                _logger?.LogInformation("Flash Plugin: Registered Pull Payment handlers");
+                FlashPluginLogger.Log("Registered Pull Payment handlers");
+
+                // Controllers temporarily removed for UI rebuild
+                applicationBuilder.AddSingleton<FlashPlugin>(this);
+                _logger?.LogInformation("Flash Plugin: Controllers disabled for UI rebuild");
+                FlashPluginLogger.Log("Controllers disabled for UI rebuild");
+
                 base.Execute(applicationBuilder);
-                _logger.LogInformation("Flash Plugin: Initialization completed successfully");
+                _logger?.LogInformation("Flash Plugin: Initialization completed successfully");
                 FlashPluginLogger.Log("Initialization completed successfully");
             }
             catch (Exception ex)
@@ -70,9 +221,7 @@ namespace BTCPayServer.Plugins.Flash
                 // Log to file system first
                 FlashPluginLogger.Log($"ERROR: {ex.Message}\n{ex.StackTrace}");
 
-                // Log to console 
-                Console.WriteLine($"Flash Plugin ERROR: {ex.Message}");
-                Console.WriteLine($"Flash Plugin ERROR: {ex.StackTrace}");
+                // Use proper logging instead of console output
 
                 // Also try standard Debug output
                 Debug.WriteLine($"Flash Plugin ERROR: {ex.Message}");

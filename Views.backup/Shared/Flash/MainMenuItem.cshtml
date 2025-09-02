@@ -1,0 +1,11 @@
+@{
+    var controllerName = ViewContext.RouteData.Values["controller"]?.ToString();
+    var isActive = (controllerName == "FlashMain" || controllerName == "BoltcardTopup");
+}
+
+<a asp-controller="FlashMain" asp-action="Index" class="nav-link @(isActive ? "active" : "")" id="FlashMainLink">
+    <span class="nav-icon">
+        <i class="fas fa-bolt" style="color: #FFD700;"></i>
+    </span>
+    <span class="nav-text">Flash</span>
+</a>

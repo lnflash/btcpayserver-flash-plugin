@@ -1,0 +1,25 @@
+{
+  "Files": [
+    {
+      "Id": "/Users/dread/Documents/Island-Bitcoin/Flash/claude/BTCPayServer.Plugins.Flash/wwwroot/img/icons/flash.svg",
+      "PackagePath": "staticwebassets/img/icons/flash.svg"
+    },
+    {
+      "Id": "obj/Release/net8.0/staticwebassets/msbuild.BTCPayServer.Plugins.Flash.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj/Release/net8.0/staticwebassets/msbuild.build.BTCPayServer.Plugins.Flash.props",
+      "PackagePath": "build\\BTCPayServer.Plugins.Flash.props"
+    },
+    {
+      "Id": "obj/Release/net8.0/staticwebassets/msbuild.buildMultiTargeting.BTCPayServer.Plugins.Flash.props",
+      "PackagePath": "buildMultiTargeting\\BTCPayServer.Plugins.Flash.props"
+    },
+    {
+      "Id": "obj/Release/net8.0/staticwebassets/msbuild.buildTransitive.BTCPayServer.Plugins.Flash.props",
+      "PackagePath": "buildTransitive\\BTCPayServer.Plugins.Flash.props"
+    }
+  ],
+  "ElementsToRemove": []
+}

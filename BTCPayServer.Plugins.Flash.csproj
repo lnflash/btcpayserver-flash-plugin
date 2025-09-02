@@ -12,8 +12,8 @@
   <!-- Plugin specific properties -->
   <PropertyGroup>
     <Product>Flash</Product>
-    <Description>Flash Lightning integration</Description>
-    <Version>1.0.0</Version>
+    <Description>Flash integration with LNURL and Lightning Address support</Description>
+    <Version>1.5.2</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <RootNamespace>BTCPayServer.Plugins.Flash</RootNamespace>
   </PropertyGroup>
@@ -36,10 +36,12 @@
     <Content Include="Views/**/*.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="_ViewImports.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
     
     <EmbeddedResource Include="Views/**/*.cshtml" />
     <EmbeddedResource Include="_ViewImports.cshtml" />
     <EmbeddedResource Include="manifest.json" />
+    <EmbeddedResource Include="wwwroot/**/*" />
     
     <None Remove="plugin-manifest.json" />
   </ItemGroup>
@@ -47,5 +49,9 @@
   <ItemGroup>
     <PackageReference Include="GraphQL.Client" Version="6.0.2" />
     <PackageReference Include="GraphQL.Client.Serializer.Newtonsoft" Version="6.0.2" />
+    <PackageReference Include="LNURL" Version="0.0.36" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
+    <PackageReference Include="Polly" Version="8.2.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
   </ItemGroup>
 </Project>
