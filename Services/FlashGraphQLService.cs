@@ -488,6 +488,9 @@ namespace BTCPayServer.Plugins.Flash.Services
                     return new List<TransactionInfo>();
                 }
 
+                // Check if this is a USD wallet
+                bool isUsdWallet = string.Equals(wallet.Currency, "USD", StringComparison.OrdinalIgnoreCase);
+
                 var query = new GraphQLRequest
                 {
                     Query = $@"
@@ -537,8 +540,10 @@ namespace BTCPayServer.Plugins.Flash.Services
                         Memo = edge.node.memo,
                         Status = edge.node.status,
                         Direction = edge.node.direction,
+                        // For USD wallets, settlementAmount is in USD cents; for BTC wallets, it's in satoshis
                         SettlementAmount = edge.node.settlementAmount,
-                        CreatedAt = DateTimeOffset.FromUnixTimeSeconds(edge.node.createdAtTimestamp).DateTime
+                        CreatedAt = DateTimeOffset.FromUnixTimeSeconds(edge.node.createdAtTimestamp).DateTime,
+                        IsUsdWallet = isUsdWallet
                     })
                     .ToList();
             }
@@ -569,6 +574,10 @@ namespace BTCPayServer.Plugins.Flash.Services
             {
                 _logger.LogInformation("[INVOICE STATUS] Checking status for payment hash: {PaymentHash}", paymentHash);
 
+                // Get wallet info to check currency
+                var wallet = await GetWalletInfoAsync(cancellation);
+                bool isUsdWallet = wallet != null && string.Equals(wallet.Currency, "USD", StringComparison.OrdinalIgnoreCase);
+
                 // First, try to find the invoice in recent transactions by checking memo
                 var transactions = await GetTransactionHistoryAsync(100, cancellation);
                 
@@ -589,11 +598,29 @@ namespace BTCPayServer.Plugins.Flash.Services
                     // This is a workaround since Flash doesn't provide direct payment hash lookup
                     var mostRecent = recentPayments.First();
                     
+                    // Convert USD cents to satoshis if this is a USD wallet
+                    decimal? amountInSats = mostRecent.SettlementAmount;
+                    if (isUsdWallet && amountInSats.HasValue)
+                    {
+                        // Get exchange rate and convert USD cents to satoshis
+                        var exchangeRate = await GetExchangeRateAsync(cancellation);
+                        if (exchangeRate > 0)
+                        {
+                            decimal usdAmount = amountInSats.Value / 100m; // Convert cents to USD
+                            decimal btcAmount = usdAmount / exchangeRate; // Convert USD to BTC
+                            amountInSats = btcAmount * 100_000_000m; // Convert BTC to satoshis
+                            amountInSats = Math.Round(amountInSats.Value, 0); // Round to whole satoshis
+                            
+                            _logger.LogInformation("[INVOICE STATUS] Converted {UsdCents} USD cents to {Sats} satoshis using rate {Rate}", 
+                                mostRecent.SettlementAmount, amountInSats, exchangeRate);
+                        }
+                    }
+                    
                     return new InvoiceStatusResult
                     {
                         PaymentHash = paymentHash,
                         Status = "PAID",
-                        AmountReceived = mostRecent.SettlementAmount,
+                        AmountReceived = amountInSats,
                         PaidAt = mostRecent.CreatedAt
                     };
                 }
@@ -714,7 +741,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                 public string? memo { get; set; }
                 public string? status { get; set; }
                 public string direction { get; set; } = null!;
-                public long? settlementAmount { get; set; }
+                public decimal? settlementAmount { get; set; }
 
                 [JsonProperty("createdAt")]
                 public long createdAtTimestamp { get; set; }

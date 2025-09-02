@@ -129,7 +129,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                             // Mark as paid
                             await invoiceService.MarkInvoiceAsPaidAsync(
                                 matchingInvoice.Key, 
-                                Math.Abs(payment.SettlementAmount ?? 0));
+                                (long)Math.Abs(payment.SettlementAmount ?? 0));
                         }
                         else if (payment.Memo?.Contains("Boltcard", StringComparison.OrdinalIgnoreCase) == true ||
                                  Math.Abs(payment.SettlementAmount ?? 0) < 1000)
@@ -139,7 +139,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                             _logger.LogInformation("[BOLTCARD POLLER] Marking likely Boltcard payment as paid: {Id}", payment.Id);
                             await invoiceService.MarkInvoiceAsPaidAsync(
                                 payment.Id, 
-                                Math.Abs(payment.SettlementAmount ?? 0));
+                                (long)Math.Abs(payment.SettlementAmount ?? 0));
                         }
                     }
                 }

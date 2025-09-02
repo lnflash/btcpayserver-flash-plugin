@@ -227,7 +227,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                             _invoiceCreationTimes[invoiceId] = DateTime.UtcNow;
                         }
                         
-                        await MarkInvoiceAsPaidAsync(invoiceId, Math.Abs(matchingTx.SettlementAmount ?? 0));
+                        await MarkInvoiceAsPaidAsync(invoiceId, (long)Math.Abs(matchingTx.SettlementAmount ?? 0));
                         
                         return paidInvoice;
                     }
@@ -263,7 +263,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                             if (status != null && status.IsPaid)
                             {
                                 _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} detected as PAID in monitoring loop!", invoiceId);
-                                await MarkInvoiceAsPaidAsync(invoiceId, status.AmountReceived ?? 1000);
+                                await MarkInvoiceAsPaidAsync(invoiceId, (long)(status.AmountReceived ?? 1000));
                                 break;
                             }
                             
@@ -276,7 +276,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                             if (paidTx != null)
                             {
                                 _logger.LogInformation("[BOLTCARD] Found paid transaction for {InvoiceId} in monitoring loop!", invoiceId);
-                                await MarkInvoiceAsPaidAsync(invoiceId, Math.Abs(paidTx.SettlementAmount ?? 0));
+                                await MarkInvoiceAsPaidAsync(invoiceId, (long)Math.Abs(paidTx.SettlementAmount ?? 0));
                                 break;
                             }
                         }

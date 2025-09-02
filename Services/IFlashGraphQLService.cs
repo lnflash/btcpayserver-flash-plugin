@@ -87,8 +87,9 @@ namespace BTCPayServer.Plugins.Flash.Services
         public string? Memo { get; set; }
         public string? Status { get; set; }
         public string Direction { get; set; } = string.Empty;
-        public long? SettlementAmount { get; set; }
+        public decimal? SettlementAmount { get; set; }
         public DateTime CreatedAt { get; set; }
+        public bool IsUsdWallet { get; set; } = false;
     }
 
     /// <summary>
@@ -99,7 +100,7 @@ namespace BTCPayServer.Plugins.Flash.Services
         public string PaymentHash { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public bool IsPaid => Status?.ToUpperInvariant() == "PAID" || Status?.ToUpperInvariant() == "SUCCESS";
-        public long? AmountReceived { get; set; }
+        public decimal? AmountReceived { get; set; }
         public DateTime? PaidAt { get; set; }
     }
 }
