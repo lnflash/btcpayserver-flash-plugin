@@ -1,3 +1,17 @@
+> [!WARNING]
+> **This repository is deprecated and no longer maintained.**
+>
+> Flash NFC card payments have moved to a Cashu-native architecture that works offline — no BTCPay Server required.
+>
+> **Replacement stack:**
+> - [lnflash/cashu-javacard](https://github.com/lnflash/cashu-javacard) — JavaCard applet + NUT-XX spec
+> - [lnflash/cashu-client](https://github.com/lnflash/cashu-client) — Cashu crypto + mint HTTP client
+> - [lnflash/flash](https://github.com/lnflash/flash) — Backend provisioning API (`cashuCardProvision` mutation)
+>
+> This repository is archived for historical reference. History is preserved.
+
+---
+
 # BTCPayServer Flash Plugin
 
 Lightning Network plugin for BTCPayServer that integrates Flash wallet capabilities.
@@ -33,8 +47,4 @@ Get your API token from Flash mobile app: Settings → Developer → API Access
 
 ## License
 
-
 MIT License
-=======
-This plugin is released under the MIT License.
-
