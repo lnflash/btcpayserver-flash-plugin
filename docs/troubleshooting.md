@@ -1,114 +1,53 @@
 # Troubleshooting
 
-## Common Issues
+Read the BTCPay log first. On a Docker install:
 
-### Connection Failed
-**Error**: "Failed to connect to Flash API"
-
-**Solutions**:
-1. Verify API token is correct
-2. Check internet connectivity
-3. Ensure Flash API is accessible
-4. Try regenerating API token in Flash app
-
-### Payment Not Detected
-**Error**: "Invoice shows unpaid after payment"
-
-**Solutions**:
-1. Check WebSocket connection status in logs
-2. Verify wallet has sufficient balance
-3. Ensure invoice hasn't expired
-4. Check Flash app for payment status
-
-### Boltcard Not Working
-**Error**: "Card tap not recognized"
-
-**Solutions**:
-1. Ensure NFC plugin is installed
-2. Verify card is properly programmed
-3. Check NFC reader compatibility
-4. Test with Flash mobile app
-
-### USD Conversion Issues
-**Error**: "Invalid amount" or conversion errors
-
-**Solutions**:
-1. Ensure USD wallet exists in Flash account
-2. Check minimum amount (1 cent USD)
-3. Verify exchange rate service is running
-4. Check for API rate limits
-
-### WebSocket Disconnections
-**Error**: "WebSocket connection lost"
-
-**Solutions**:
-1. Check network stability
-2. Review firewall settings
-3. Verify WebSocket endpoints are accessible
-4. Check for proxy/reverse proxy configuration issues
-
-## Debug Mode
-
-Enable detailed logging:
-
-1. Edit `appsettings.json`:
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "BTCPayServer.Plugins.Flash": "Debug"
-    }
-  }
-}
+```sh
+docker logs --since 30m generated_btcpayserver_1 2>&1 | grep -E "Plugins.Flash|INVOICE STATUS|GetPayment|PAYMENT|^fail"
 ```
 
-2. Restart BTCPayServer
+## Common problems
 
-3. Check logs for detailed error messages
+| Symptom in the log or UI | Cause | Fix |
+|---|---|---|
+| `[AuthHandler] Received Unauthorized response`, then `No wallet found` | The token is invalid, revoked or expired. `ory_st_` session tokens expire | Create an API key at console.flashapp.me and update the connection string |
+| `Missing 'server' parameter` or `Missing 'token' parameter` | Old connection string format (`api=`, `api-token=`) | Use `type=flash;server=https://api.flashapp.me/graphql;token=fk_...` |
+| `insufficient balance. Current Balance: 0.000000` when sending, though the wallet has funds | The plugin is paying from the legacy USD wallet instead of the USDT cash wallet | Update to 1.6.3 or later; the log should say `Flash reports USDT` |
+| Plugins page still shows the old version after uploading | The uploaded file was renamed, so it installed beside the old one | Delete the extra folder in the plugins directory and upload `BTCPayServer.Plugins.Flash.btcpay` under that exact name |
+| Card top-up paid, but the card balance hasn't changed | The balance page can lag a few seconds behind the payment | Tap again after a few seconds; check the payout list on the card's pull payment |
+| Payout stuck *In progress* | Flash answered `PENDING` and has not reported a final status. Flash cannot report on invoices from other Lightning nodes | Check the payment in the Flash account and complete or cancel the payout by hand |
+| `Ignoring paid notification for invoice …` | An internal check thought an invoice was paid but Flash did not confirm it | Nothing; this is the plugin refusing to mark an unconfirmed payment as paid |
+| `[GetPayment] No record of sending …; reporting pending` | BTCPay asked about a payment sent before the last restart | Check the payment in Flash and settle the payout by hand |
 
-## Log Analysis
+## What a healthy payment looks like
 
-### Key Log Patterns
+**Receiving (top-up):**
 
-**Successful connection**:
-```
-Flash Lightning client connected successfully
-WebSocket connection established
-```
-
-**Payment received**:
-```
-Invoice [hash] marked as paid
-Payment of [amount] sats received
-```
-
-**Connection issues**:
-```
-Failed to connect to Flash API: [error]
-WebSocket reconnection attempt [n]
+```text
+Creating invoice for 58 sats with memo: 'Boltcard Top-Up'
+[INVOICE STATUS] Invoice 4622… is Paid according to Flash (amount received: 0.00000059)
+BTC (Lightning): Payment detected via notification (Ak6Q…)
 ```
 
-## Performance Issues
+**Sending (card spend):**
 
-### Slow Payment Detection
-1. Check WebSocket connection health
-2. Verify server resources (CPU, RAM)
-3. Review network latency to Flash API
-4. Check for rate limiting
+```text
+[PAYMENT] Payment sent successfully!
+[GetPayment] Payment 433d… is Complete
+```
 
-### High Memory Usage
-1. Review log file sizes
-2. Check for memory leaks in logs
-3. Restart BTCPayServer service
-4. Monitor WebSocket connection count
+## Checking the API key directly
 
-## Getting Help
+```sh
+curl -s https://api.flashapp.me/graphql \
+  -H 'Content-Type: application/json' \
+  -H "X-API-KEY: $FLASH_API_KEY" \
+  -H 'X-Flash-Client-Capabilities: cash-wallet-usdt-v1' \
+  -d '{"query":"{ me { defaultAccount { wallets { id walletCurrency balance } } } }"}'
+```
 
-1. **Enable debug logging** (see above)
-2. **Collect logs** from the past hour
-3. **Include details**:
-   - BTCPayServer version
-   - Plugin version
-   - Error messages
-   - Steps to reproduce
-4. **Report issue** on [GitHub](https://github.com/lnflash/btcpayserver-flash-plugin/issues)
+A working key returns the account's wallets. The cash wallet shows as `USDT` with its balance in cents. A `401` means the key itself is the problem.
+
+## Still stuck?
+
+[Open an issue](https://github.com/lnflash/btcpayserver-flash-plugin/issues) with the plugin version, the BTCPay version, and the relevant log lines. Remove tokens and keys first.
