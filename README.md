@@ -10,7 +10,7 @@ No node to run, no channels to manage. Payments settle in the account's dollar w
 ![release](https://img.shields.io/github/v/release/lnflash/btcpayserver-flash-plugin?color=6B46C1)
 ![BTCPay Server](https://img.shields.io/badge/BTCPay_Server-2.x-51B13E)
 ![.NET](https://img.shields.io/badge/.NET-8-512BD4)
-![license](https://img.shields.io/badge/license-MIT-blue)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
 
@@ -63,4 +63,4 @@ Full walkthrough: **[docs/installation.md](docs/installation.md)**
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2025-2026 Island Bitcoin LLC
