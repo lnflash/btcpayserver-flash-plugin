@@ -4,11 +4,11 @@ Lightning Network plugin for BTCPayServer that integrates Flash wallet capabilit
 
 ## Quick Start
 
-1. **Install**: Server Settings → Plugins → Search "Flash" → Install
+1. **Install**: Server Settings → Plugins → upload `BTCPayServer.Plugins.Flash.btcpay` from `releases/` → restart
 2. **Configure**: Store → Lightning → Setup Lightning Node → Use custom node
-3. **Connection string**: `type=flash;api=https://api.flashapp.me/graphql;api-token=YOUR_TOKEN`
+3. **Connection string**: `type=flash;server=https://api.flashapp.me/graphql;token=fk_...`
 
-Get your API token from Flash mobile app: Settings → Developer → API Access
+Get an API key at [console.flashapp.me](https://console.flashapp.me) with the scopes `read_user`, `read_wallet`, `write_wallet` and `read_transactions`.
 
 ## Features
 
@@ -29,8 +29,7 @@ Get your API token from Flash mobile app: Settings → Developer → API Access
 
 ## Support
 
-- [Report Issues](https://github.com/Island-Bitcoin/BTCPayServer.Plugins.Flash/issues)
-- [Discussions](https://github.com/Island-Bitcoin/BTCPayServer.Plugins.Flash/discussions)
+- [Report Issues](https://github.com/lnflash/btcpayserver-flash-plugin/issues)
 
 ## License
 
