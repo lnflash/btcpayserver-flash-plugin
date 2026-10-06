@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="50" height="50">
-  <path d="M11 21h-1l1-7H7.5c-.58 0-.912-.753-.588-1.266L12.562 3h1l-1 7h3.5c.555 0 .869.73.55 1.221L11 21Z" fill="#FFD700"/>
-</svg>
-EOF < /dev/null
