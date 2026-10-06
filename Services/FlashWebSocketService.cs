@@ -76,6 +76,12 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         public async Task ConnectAsync(string bearerToken, Uri websocketEndpoint, CancellationToken cancellation = default)
         {
+            if (!FlashAuth.SupportsWebSocket(bearerToken))
+            {
+                _logger.LogDebug("Skipping WebSocket connection: Flash API keys cannot authenticate subscriptions");
+                return;
+            }
+
             await _connectionLock.WaitAsync(cancellation);
             try
             {

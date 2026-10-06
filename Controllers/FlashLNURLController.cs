@@ -24,15 +24,18 @@ namespace BTCPayServer.Plugins.Flash.Controllers
     {
         private readonly StoreRepository _storeRepository;
         private readonly ILogger<FlashLNURLController> _logger;
+        private readonly ILoggerFactory _loggerFactory;
 
         private const string SettingsKey = "BTCPayServer.Plugins.Flash.Settings";
 
         public FlashLNURLController(
             StoreRepository storeRepository,
-            ILogger<FlashLNURLController> logger)
+            ILogger<FlashLNURLController> logger,
+            ILoggerFactory loggerFactory)
         {
             _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         }
 
         // LNURL-pay discovery endpoint
@@ -125,22 +128,17 @@ namespace BTCPayServer.Plugins.Flash.Controllers
 
                 try
                 {
-                    _logger.LogInformation("=== Creating FlashSimpleInvoiceService ===");
-                    _logger.LogInformation($"API Endpoint: {settings.ApiEndpoint ?? "https://api.flashapp.me/graphql"}");
-                    _logger.LogInformation($"Has Bearer Token: {!string.IsNullOrEmpty(settings.BearerToken)}");
-                    
-                    // Use the simple invoice service to create invoice directly via HTTP
-                    var simpleInvoiceService = new FlashSimpleInvoiceService(
-                        settings.BearerToken!,
-                        new Uri(settings.ApiEndpoint ?? "https://api.flashapp.me/graphql"),
-                        _logger);
+                    var endpoint = new Uri(settings.ApiEndpoint ?? "https://api.flashapp.me/graphql");
+                    using var graphQLService = new FlashGraphQLService(settings.BearerToken!, endpoint,
+                        _loggerFactory.CreateLogger<FlashGraphQLService>(), null, _loggerFactory);
+                    var invoiceService = new FlashInvoiceService(
+                        graphQLService,
+                        new FlashExchangeRateService(graphQLService, _loggerFactory.CreateLogger<FlashExchangeRateService>()),
+                        new FlashBoltcardService(_loggerFactory.CreateLogger<FlashBoltcardService>()),
+                        _loggerFactory.CreateLogger<FlashInvoiceService>());
 
-                    _logger.LogInformation($"=== Calling CreateInvoiceAsync with amount: {amountSats} sats ===");
-                    var invoice = await simpleInvoiceService.CreateInvoiceAsync(
-                        amountSats,
-                        description);
-                    
-                    simpleInvoiceService.Dispose();
+                    var invoice = await invoiceService.CreateInvoiceAsync(
+                        LightMoney.Satoshis(amountSats), description, TimeSpan.FromHours(1));
 
                     var response = new
                     {
@@ -156,7 +154,7 @@ namespace BTCPayServer.Plugins.Flash.Controllers
                 }
                 catch (Exception invoiceEx)
                 {
-                    _logger.LogError(invoiceEx, "Failed to create invoice using simple service");
+                    _logger.LogError(invoiceEx, "Failed to create invoice for flashcard {CardId}", cardId);
                     return Ok(new { status = "ERROR", reason = "Failed to create invoice: " + invoiceEx.Message });
                 }
             }

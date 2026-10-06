@@ -4,19 +4,19 @@
 
 Required parameters:
 - `type=flash` - Identifies this as a Flash Lightning connection
-- `api=https://api.flashapp.me/graphql` - Flash API endpoint
-- `api-token=YOUR_TOKEN` - Your Flash API token
+- `server=https://api.flashapp.me/graphql` - Flash API endpoint
+- `token=fk_...` - A Flash API key from [console.flashapp.me](https://console.flashapp.me) (scopes `read_user`, `read_wallet`, `write_wallet`, `read_transactions`). Legacy `ory_st_...` session tokens also work but expire.
 
 ## Environment URLs
 
 ### Production
 ```
-type=flash;api=https://api.flashapp.me/graphql;api-token=YOUR_TOKEN
+type=flash;server=https://api.flashapp.me/graphql;token=fk_...
 ```
 
 ### Test/Staging
 ```
-type=flash;api=https://api.test.flashapp.me/graphql;api-token=YOUR_TOKEN
+type=flash;server=https://api.test.flashapp.me/graphql;token=fk_...
 ```
 
 ## Advanced Configuration

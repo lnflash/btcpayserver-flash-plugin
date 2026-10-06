@@ -49,9 +49,10 @@ namespace BTCPayServer.Plugins.Flash.Services
         Task<decimal?> GetWalletBalanceAsync(CancellationToken cancellation = default);
 
         /// <summary>
-        /// Get Lightning invoice status by payment hash
+        /// Get the payment status of one Lightning invoice by its payment request (BOLT11).
+        /// Returns null when Flash cannot report a status.
         /// </summary>
-        Task<InvoiceStatusResult?> GetInvoiceStatusAsync(string paymentHash, CancellationToken cancellation = default);
+        Task<InvoiceStatusResult?> GetInvoiceStatusAsync(string paymentRequest, CancellationToken cancellation = default);
     }
 
     /// <summary>

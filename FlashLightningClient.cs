@@ -165,7 +165,7 @@ namespace BTCPayServer.Plugins.Flash
 
             // Make sure authorization header is set correctly
             httpClient.DefaultRequestHeaders.Clear();
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            FlashAuth.Apply(httpClient.DefaultRequestHeaders, _bearerToken);
 
             var options = new GraphQLHttpClientOptions
             {
@@ -216,7 +216,11 @@ namespace BTCPayServer.Plugins.Flash
             _monitoringService = new FlashMonitoringService(_invoiceService, _transactionService, _boltcardService, _webSocketService, monitoringLogger);
 
             // Try to establish WebSocket connection for real-time updates
-            if (_webSocketService != null)
+            if (_webSocketService != null && !FlashAuth.SupportsWebSocket(_bearerToken))
+            {
+                _logger.LogInformation("Flash API key in use - WebSocket subscriptions need a session token, using polling for invoice updates");
+            }
+            else if (_webSocketService != null)
             {
                 _ = Task.Run(async () =>
                 {
@@ -566,54 +570,8 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
-                // For simple invoice creation (like LNURL), try WebSocket first (works with Ory tokens)
-                if (createParams?.Amount != null && !string.IsNullOrEmpty(createParams.Description))
-                {
-                    var amountSats = createParams.Amount.ToUnit(LightMoneyUnit.Satoshi);
-                    
-                    // === Use HTTP for invoice creation (WebSocket only supports subscriptions) ===
-                    try
-                    {
-                        _logger.LogInformation("=== Using HTTP with FlashSimpleInvoiceService ===");
-                        
-                        var simpleService = new Services.FlashSimpleInvoiceService(
-                            _bearerToken,
-                            _endpoint,
-                            _logger);
-                        
-                        var simpleInvoice = await simpleService.CreateInvoiceAsync(
-                            (long)amountSats,
-                            createParams.Description,
-                            cancellation);
-                        
-                        _logger.LogInformation($"=== Successfully created invoice via FlashSimpleInvoiceService: {simpleInvoice.Id} ===");
-                        
-                        // Dispose of the service
-                        simpleService.Dispose();
-                        
-                        // Track the invoice to enable WebSocket subscriptions
-                        if (simpleInvoice != null)
-                        {
-                            TrackPendingInvoice(simpleInvoice);
-                        }
-                        
-                        return simpleInvoice;
-                    }
-                    catch (Exception simpleEx)
-                    {
-                        _logger.LogWarning(simpleEx, "Failed to use FlashSimpleInvoiceService, falling back to standard service");
-                    }
-                }
-                
-                // Final fallback to standard service
                 var invoice = await _invoiceService.CreateInvoiceAsync(createParams, cancellation);
-                
-                // Track the invoice to enable WebSocket subscriptions
-                if (invoice != null)
-                {
-                    TrackPendingInvoice(invoice);
-                }
-                
+                TrackPendingInvoice(invoice);
                 return invoice;
             }
             catch (Exception ex)
@@ -623,69 +581,9 @@ namespace BTCPayServer.Plugins.Flash
             }
         }
 
-        // Overload for standard CreateInvoice
-        public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default)
+        public Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default)
         {
-            var amountSats = amount.ToUnit(LightMoneyUnit.Satoshi);
-            
-            // === Use HTTP for invoice creation (WebSocket only supports subscriptions) ===
-            try
-            {
-                _logger.LogInformation("=== Using HTTP with FlashSimpleInvoiceService (overload) ===");
-                
-                var simpleService = new Services.FlashSimpleInvoiceService(
-                    _bearerToken,
-                    _endpoint,
-                    _logger);
-                
-                var simpleInvoice = await simpleService.CreateInvoiceAsync(
-                    (long)amountSats,
-                    description,
-                    cancellation);
-                
-                _logger.LogInformation($"=== Successfully created invoice via FlashSimpleInvoiceService: {simpleInvoice.Id} ===");
-                
-                // Dispose of the service
-                simpleService.Dispose();
-                
-                // Track the invoice to enable WebSocket subscriptions for payment notifications
-                if (simpleInvoice != null)
-                {
-                    TrackPendingInvoice(simpleInvoice);
-                    
-                    // Ensure WebSocket is connected for payment notifications
-                    if (!_webSocketService.IsConnected)
-                    {
-                        try
-                        {
-                            _logger.LogInformation("Connecting WebSocket for payment notifications");
-                            var wsEndpoint = new Uri(_endpoint.ToString().Replace("https://", "wss://").Replace("http://", "ws://"));
-                            await _webSocketService.ConnectAsync(_bearerToken, wsEndpoint, cancellation);
-                        }
-                        catch (Exception wsEx)
-                        {
-                            _logger.LogWarning(wsEx, "Failed to connect WebSocket for payment notifications");
-                        }
-                    }
-                }
-                
-                return simpleInvoice;
-            }
-            catch (Exception simpleEx)
-            {
-                _logger.LogWarning(simpleEx, "Failed to use FlashSimpleInvoiceService (overload), falling back to standard service");
-                
-                // Final fallback to the invoice service
-                var invoice = await _invoiceService.CreateInvoiceAsync(amount, description, expiry, cancellation);
-                
-                // Track the invoice to enable WebSocket subscriptions for payment notifications
-                if (invoice != null)
-                {
-                    TrackPendingInvoice(invoice);
-                }
-                
-                return invoice;
-            }
+            return CreateInvoice(new CreateInvoiceParams(amount, description, expiry), cancellation);
         }
 
         public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = default)
@@ -1271,266 +1169,46 @@ namespace BTCPayServer.Plugins.Flash
 
         public async Task<LightningPayment> GetPayment(string paymentHash, CancellationToken cancellation = default)
         {
-            try
+            // Flash transactions carry no payment hash, so only payments this plugin recorded when
+            // sending can be reported on. Anything else stays pending rather than being guessed.
+            if (!OutgoingPayments.TryGet(paymentHash, out var sent))
             {
-                _logger.LogInformation($"Attempting to get payment status for hash: {paymentHash}");
-
-                // First check if this is a recently submitted payment that we know is PENDING
-                if (_recentPayments.TryGetValue(paymentHash, out var knownStatus) &&
-                    _paymentSubmitTimes.TryGetValue(paymentHash, out var submitTime))
-                {
-                    // If it's been less than 60 seconds since submission, just return the known status
-                    if ((DateTime.UtcNow - submitTime).TotalSeconds < 60)
-                    {
-                        _logger.LogInformation($"Using cached status for recent payment {paymentHash}: {knownStatus}");
-                        return new LightningPayment
-                        {
-                            Id = paymentHash,
-                            PaymentHash = paymentHash,
-                            Status = knownStatus,
-                            CreatedAt = submitTime,
-                            // Add a reasonable amount based on last pull payment if available
-                            Amount = _lastPullPaymentAmount.HasValue
-                                ? LightMoney.Satoshis(_lastPullPaymentAmount.Value)
-                                : LightMoney.Satoshis(10000) // Default to minimum amount
-                        };
-                    }
-                }
-
-                // Check if this might be related to an LNURL payment
-                // Try to find any tracked LNURL payments
-                string? matchingLnurlKey = null;
-                foreach (var key in _recentPayments.Keys)
-                {
-                    if (key.StartsWith("LNURL", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Generate hash of this LNURL to see if it matches the requested hash
-                        string lnurlHash = BitConverter.ToString(
-                            System.Security.Cryptography.SHA256.HashData(
-                                Encoding.UTF8.GetBytes(key)
-                            )
-                        ).Replace("-", "").ToLower();
-
-                        if (lnurlHash == paymentHash.ToLower())
-                        {
-                            matchingLnurlKey = key;
-                            _logger.LogInformation($"[PAYMENT DEBUG] Found LNURL that hashes to requested payment hash: {key}");
-                            break;
-                        }
-
-                        // Try a few other variants
-                        string lnurlReversedHash = BitConverter.ToString(
-                            System.Security.Cryptography.SHA256.HashData(
-                                Encoding.UTF8.GetBytes(key.ToLower())
-                            )
-                        ).Replace("-", "").ToLower();
-
-                        if (lnurlReversedHash == paymentHash.ToLower())
-                        {
-                            matchingLnurlKey = key;
-                            _logger.LogInformation($"[PAYMENT DEBUG] Found LNURL that hashes to requested payment hash (lowercase): {key}");
-                            break;
-                        }
-                    }
-                }
-
-                // If we found a matching LNURL, use its status
-                if (matchingLnurlKey != null &&
-                    _recentPayments.TryGetValue(matchingLnurlKey, out var lnurlStatus) &&
-                    _paymentSubmitTimes.TryGetValue(matchingLnurlKey, out var lnurlSubmitTime))
-                {
-                    if ((DateTime.UtcNow - lnurlSubmitTime).TotalSeconds < 300) // 5 minutes
-                    {
-                        _logger.LogInformation($"Using cached status from matching LNURL {matchingLnurlKey}: {lnurlStatus}");
-
-                        // If we have the payment in our pending dictionary, mark it as associated with this hash
-                        _recentPayments[paymentHash] = lnurlStatus;
-                        _paymentSubmitTimes[paymentHash] = lnurlSubmitTime;
-
-                        return new LightningPayment
-                        {
-                            Id = paymentHash,
-                            PaymentHash = paymentHash,
-                            Status = lnurlStatus,
-                            CreatedAt = lnurlSubmitTime,
-                            Amount = _lastPullPaymentAmount.HasValue
-                                ? LightMoney.Satoshis(_lastPullPaymentAmount.Value)
-                                : LightMoney.Satoshis(10000) // Default to minimum amount
-                        };
-                    }
-                }
-
-                // Check if this is a pull payment we've processed
-                if (_pullPaymentInvoices.TryGetValue(paymentHash, out var associatedInvoice))
-                {
-                    _logger.LogInformation($"Found associated invoice {associatedInvoice} for payment hash {paymentHash}");
-
-                    // Get the invoice status
-                    var invoice = await GetInvoice(associatedInvoice, cancellation);
-
-                    // Convert invoice to payment
-                    return new LightningPayment
-                    {
-                        Id = paymentHash,
-                        PaymentHash = paymentHash,
-                        BOLT11 = invoice.BOLT11,
-                        Status = invoice.Status == LightningInvoiceStatus.Paid
-                            ? LightningPaymentStatus.Complete
-                            : LightningPaymentStatus.Pending,
-                        Amount = invoice.Amount,
-                        AmountSent = invoice.Status == LightningInvoiceStatus.Paid ? invoice.AmountReceived : null,
-                        // LightningInvoice doesn't have CreatedAt, use current time as fallback
-                        CreatedAt = DateTime.UtcNow
-                    };
-                }
-
-                // Try to find the payment in transaction history
-                var query = new GraphQLRequest
-                {
-                    Query = @"
-                    query GetWalletTransactions {
-                      me {
-                        defaultAccount {
-                          wallets {
-                            id
-                            transactions {
-                              edges {
-                                node {
-                                  id
-                                  status
-                                  direction
-                                  settlementAmount
-                                  createdAt
-                                  memo
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }",
-                    OperationName = "GetWalletTransactions"
-                };
-
-                var response = await _graphQLClient.SendQueryAsync<TransactionsFullResponse>(query, cancellation);
-
-                if (response.Errors != null && response.Errors.Length > 0)
-                {
-                    string errorMessage = string.Join(", ", response.Errors.Select(e => e.Message));
-                    _logger.LogWarning($"GraphQL error fetching transactions: {errorMessage}");
-
-                    // Fall back to a default completed payment for LNURL payments
-                    if (paymentHash.StartsWith("LNURL", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogInformation($"Creating fallback completed payment for LNURL: {paymentHash}");
-                        return CreateCompletedPaymentForLnurl(paymentHash);
-                    }
-                }
-
-                // Check all wallets for a matching transaction
-                var wallets = response.Data?.me?.defaultAccount?.wallets;
-                if (wallets != null)
-                {
-                    foreach (var wallet in wallets)
-                    {
-                        var transactions = wallet.transactions?.edges;
-                        if (transactions == null)
-                            continue;
-
-                        // Look for transaction by ID or memo containing paymentHash
-                        var matchingTransaction = transactions.FirstOrDefault(e =>
-                            e.node.id == paymentHash ||
-                            (e.node.memo != null && e.node.memo.Contains(paymentHash)))?.node;
-
-                        if (matchingTransaction != null)
-                        {
-                            _logger.LogInformation($"Found matching transaction for payment hash: {paymentHash}");
-
-                            return new LightningPayment
-                            {
-                                Id = paymentHash,
-                                PaymentHash = paymentHash,
-                                Status = matchingTransaction.status?.ToLowerInvariant() switch
-                                {
-                                    "success" => LightningPaymentStatus.Complete,
-                                    "complete" => LightningPaymentStatus.Complete,
-                                    "pending" => LightningPaymentStatus.Pending,
-                                    "failed" => LightningPaymentStatus.Failed,
-                                    _ => LightningPaymentStatus.Unknown
-                                },
-                                Amount = matchingTransaction.settlementAmount != null
-                                    ? new LightMoney(Math.Abs((long)matchingTransaction.settlementAmount), LightMoneyUnit.Satoshi)
-                                    : LightMoney.Zero,
-                                AmountSent = matchingTransaction.status?.ToLowerInvariant() == "success" ||
-                                            matchingTransaction.status?.ToLowerInvariant() == "complete"
-                                    ? (matchingTransaction.settlementAmount != null
-                                        ? new LightMoney(Math.Abs((long)matchingTransaction.settlementAmount), LightMoneyUnit.Satoshi)
-                                        : LightMoney.Zero)
-                                    : null,
-                                CreatedAt = matchingTransaction.createdAt
-                            };
-                        }
-                    }
-                }
-
-                // Special handling for LNURL payments - assume completed if not found
-                if (paymentHash.StartsWith("LNURL", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation($"No transaction found for LNURL, assuming completed: {paymentHash}");
-                    return CreateCompletedPaymentForLnurl(paymentHash);
-                }
-
-                // For other payment hashes, create a pending payment status and track it
-                _logger.LogWarning($"No transaction found for payment hash: {paymentHash}, returning pending status");
-
-                // Add this hash to our tracking system so future GetPayment calls will return consistently
-                _recentPayments[paymentHash] = LightningPaymentStatus.Pending;
-                _paymentSubmitTimes[paymentHash] = DateTime.UtcNow;
-
-                // Check if there are any recent payments at all - if so, there's a high probability
-                // this unknown hash is related to them
-                var recentlySubmittedPayments = _paymentSubmitTimes
-                    .Where(kvp => (DateTime.UtcNow - kvp.Value).TotalSeconds < 60)
-                    .OrderByDescending(kvp => kvp.Value)
-                    .ToList();
-
-                if (recentlySubmittedPayments.Any())
-                {
-                    _logger.LogInformation($"[PAYMENT DEBUG] Found {recentlySubmittedPayments.Count} recently submitted payments, assuming association with: {paymentHash}");
-                }
-
-                // Return a pending payment as fallback
+                _logger.LogWarning("[GetPayment] No record of sending {PaymentHash}; reporting pending", paymentHash);
                 return new LightningPayment
                 {
                     Id = paymentHash,
                     PaymentHash = paymentHash,
                     Status = LightningPaymentStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    Amount = _lastPullPaymentAmount.HasValue
-                        ? LightMoney.Satoshis(_lastPullPaymentAmount.Value)
-                        : LightMoney.Satoshis(10000) // Default to minimum amount
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
             }
-            catch (Exception ex)
+
+            var status = sent.Outcome;
+            if (status != LightningPaymentStatus.Complete && status != LightningPaymentStatus.Failed)
             {
-                _logger.LogError(ex, $"Error getting payment {paymentHash}");
-
-                // Special handling for LNURL - assume completed if we can't verify
-                if (paymentHash.StartsWith("LNURL", StringComparison.OrdinalIgnoreCase))
+                // Flash can report on invoices it issued; for other nodes it returns no status
+                var invoiceStatus = await _graphQLService.GetInvoiceStatusAsync(sent.Bolt11, cancellation);
+                status = invoiceStatus?.Status?.ToUpperInvariant() switch
                 {
-                    _logger.LogInformation($"Error getting LNURL payment, assuming completed: {paymentHash}");
-                    return CreateCompletedPaymentForLnurl(paymentHash);
-                }
-
-                // Return a pending payment as fallback
-                return new LightningPayment
-                {
-                    Id = paymentHash,
-                    PaymentHash = paymentHash,
-                    Status = LightningPaymentStatus.Pending,
-                    CreatedAt = DateTime.UtcNow
+                    "PAID" => LightningPaymentStatus.Complete,
+                    "EXPIRED" => LightningPaymentStatus.Failed,
+                    _ => LightningPaymentStatus.Pending
                 };
+                if (status != LightningPaymentStatus.Pending)
+                    OutgoingPayments.SetOutcome(paymentHash, status);
             }
+
+            _logger.LogInformation("[GetPayment] Payment {PaymentHash} is {Status}", paymentHash, status);
+            return new LightningPayment
+            {
+                Id = paymentHash,
+                PaymentHash = paymentHash,
+                BOLT11 = sent.Bolt11,
+                Status = status,
+                Amount = sent.Amount,
+                AmountSent = status == LightningPaymentStatus.Complete ? sent.Amount : null,
+                CreatedAt = sent.SubmittedAt
+            };
         }
 
         private LightningPayment CreateCompletedPaymentForLnurl(string lnurlString)
@@ -1557,26 +1235,7 @@ namespace BTCPayServer.Plugins.Flash
         {
             try
             {
-                // First check if this invoice was recently paid
-                var recentlyPaid = GetRecentlyPaidInvoice(invoiceId);
-                if (recentlyPaid != null)
-                {
-                    _logger.LogInformation($"[GetInvoice] Found recently paid invoice {invoiceId} in cache, returning as paid");
-                    
-                    // Return the invoice as paid immediately
-                    return new LightningInvoice
-                    {
-                        Id = recentlyPaid.InvoiceId,
-                        PaymentHash = recentlyPaid.PaymentHash,
-                        Status = LightningInvoiceStatus.Paid,
-                        Amount = LightMoney.Satoshis(recentlyPaid.AmountSats),
-                        AmountReceived = LightMoney.Satoshis(recentlyPaid.AmountSats),
-                        BOLT11 = recentlyPaid.Bolt11,
-                        PaidAt = recentlyPaid.PaidAt,
-                        ExpiresAt = recentlyPaid.PaidAt.AddHours(1) // Set a reasonable expiry
-                    };
-                }
-
+                // The invoice service only reports an invoice as paid once Flash confirms that exact invoice
                 // Delegate to the invoice service
                 var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
                 
@@ -1877,54 +1536,9 @@ namespace BTCPayServer.Plugins.Flash
             };
         }
 
-        public async Task<LightningInvoice> GetInvoice(uint256 invoiceId, CancellationToken cancellation = default)
+        public Task<LightningInvoice> GetInvoice(uint256 invoiceId, CancellationToken cancellation = default)
         {
-            // First check if this invoice was recently paid
-            var invoiceIdStr = invoiceId.ToString();
-            var recentlyPaid = GetRecentlyPaidInvoice(invoiceIdStr);
-            if (recentlyPaid != null)
-            {
-                _logger.LogInformation($"[GetInvoice] Found recently paid invoice {invoiceIdStr} in cache, returning as paid");
-                
-                // Return the invoice as paid immediately
-                return new LightningInvoice
-                {
-                    Id = recentlyPaid.InvoiceId,
-                    PaymentHash = recentlyPaid.PaymentHash,
-                    Status = LightningInvoiceStatus.Paid,
-                    Amount = LightMoney.Satoshis(recentlyPaid.AmountSats),
-                    AmountReceived = LightMoney.Satoshis(recentlyPaid.AmountSats),
-                    BOLT11 = recentlyPaid.Bolt11,
-                    PaidAt = recentlyPaid.PaidAt,
-                    ExpiresAt = recentlyPaid.PaidAt.AddHours(1) // Set a reasonable expiry
-                };
-            }
-
-            // Delegate to the invoice service
-            var invoice = await _invoiceService.GetInvoiceAsync(invoiceId, cancellation);
-            
-            // If the invoice is unpaid and not already tracked, track it for WebSocket updates
-            if (invoice != null && invoice.Status == LightningInvoiceStatus.Unpaid)
-            {
-                bool shouldTrack = false;
-                
-                // Check if we're already tracking this invoice
-                lock (_invoiceTrackingLock)
-                {
-                    if (!_pendingInvoices.ContainsKey(invoice.Id))
-                    {
-                        shouldTrack = true;
-                    }
-                }
-                
-                if (shouldTrack)
-                {
-                    _logger.LogInformation($"[GetInvoice] Found unpaid invoice {invoice.Id}, adding to tracking");
-                    TrackPendingInvoice(invoice);
-                }
-            }
-            
-            return invoice;
+            return GetInvoice(invoiceId.ToString(), cancellation);
         }
 
         public Task<LightningInvoice[]> ListInvoices(CancellationToken cancellation = default)
@@ -1981,13 +1595,13 @@ namespace BTCPayServer.Plugins.Flash
                 _logger.LogInformation("[INVOICE LISTENER] Monitoring service started - notifications will be sent to BTCPay Server");
 
                 // Create and return the listener that uses the monitoring service
-                return new FlashLightningInvoiceListener(_monitoringService, _logger);
+                return new FlashLightningInvoiceListener(_monitoringService, _invoiceService, _logger);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error setting up Flash invoice listener");
                 // Return a dummy listener on error
-                return new FlashLightningInvoiceListener(null, _logger);
+                return new FlashLightningInvoiceListener(null, _invoiceService, _logger);
             }
         }
 
@@ -2014,13 +1628,16 @@ namespace BTCPayServer.Plugins.Flash
         private class FlashLightningInvoiceListener : ILightningInvoiceListener
         {
             private readonly IFlashMonitoringService? _monitoringService;
+            private readonly IFlashInvoiceService _invoiceService;
             private readonly ILogger _logger;
 
             public FlashLightningInvoiceListener(
                 IFlashMonitoringService? monitoringService,
+                IFlashInvoiceService invoiceService,
                 ILogger logger)
             {
                 _monitoringService = monitoringService;
+                _invoiceService = invoiceService;
                 _logger = logger;
             }
 
@@ -2033,8 +1650,18 @@ namespace BTCPayServer.Plugins.Flash
 
                 try
                 {
-                    // Use the monitoring service to wait for paid invoices
-                    return await _monitoringService.WaitInvoiceAsync(cancellation);
+                    // Several internal paths push "paid" invoices based on guesses. Only return an
+                    // invoice to BTCPay once Flash confirms that exact invoice is paid.
+                    while (true)
+                    {
+                        var candidate = await _monitoringService.WaitInvoiceAsync(cancellation);
+                        var verified = await _invoiceService.GetVerifiedInvoiceAsync(candidate.Id, cancellation);
+                        if (verified?.Status == LightningInvoiceStatus.Paid)
+                            return verified;
+
+                        _logger.LogWarning("Ignoring paid notification for invoice {InvoiceId}: Flash reports {Status}",
+                            candidate.Id, verified?.Status.ToString() ?? "no status");
+                    }
 
                 }
                 catch (OperationCanceledException)

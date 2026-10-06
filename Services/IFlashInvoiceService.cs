@@ -62,8 +62,14 @@ namespace BTCPayServer.Plugins.Flash.Services
         void TrackPendingInvoice(LightningInvoice invoice);
 
         /// <summary>
-        /// Mark an invoice as paid and notify BTCPay Server
+        /// Record a payment for an invoice, but only once Flash confirms that exact invoice is paid
         /// </summary>
         Task MarkInvoiceAsPaidAsync(string paymentHash, long amountSats, string? boltcardId = null);
+
+        /// <summary>
+        /// Ask Flash for the status of an invoice this plugin created, by its payment request.
+        /// Returns null when the invoice is unknown or Flash cannot report a status.
+        /// </summary>
+        Task<LightningInvoice?> GetVerifiedInvoiceAsync(string invoiceId, CancellationToken cancellation = default);
     }
 }

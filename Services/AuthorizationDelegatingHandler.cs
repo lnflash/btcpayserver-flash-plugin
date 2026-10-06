@@ -27,9 +27,9 @@ namespace BTCPayServer.Plugins.Flash.Services
             CancellationToken cancellationToken)
         {
             // Always ensure the authorization header is set
-            if (request.Headers.Authorization == null)
+            if (!FlashAuth.HasCredential(request.Headers))
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                FlashAuth.Apply(request.Headers, _bearerToken);
                 _logger.LogDebug("[AuthHandler] Added authorization header to request: {Method} {Uri}", 
                     request.Method, request.RequestUri);
             }

@@ -30,9 +30,10 @@ namespace BTCPayServer.Plugins.Flash.Services
             // Log headers (excluding sensitive authorization data)
             foreach (var header in request.Headers)
             {
-                if (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase))
+                if (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+                    header.Key.Equals(FlashAuth.ApiKeyHeader, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogInformation("[HTTP Request {RequestId}] Header: {Key}: Bearer [REDACTED]", requestId, header.Key);
+                    _logger.LogInformation("[HTTP Request {RequestId}] Header: {Key}: [REDACTED]", requestId, header.Key);
                 }
                 else
                 {

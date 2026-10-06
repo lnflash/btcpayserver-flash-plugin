@@ -111,4 +111,4 @@ WebSocket reconnection attempt [n]
    - Plugin version
    - Error messages
    - Steps to reproduce
-4. **Report issue** on [GitHub](https://github.com/Island-Bitcoin/BTCPayServer.Plugins.Flash/issues)
+4. **Report issue** on [GitHub](https://github.com/lnflash/btcpayserver-flash-plugin/issues)

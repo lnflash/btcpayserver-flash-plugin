@@ -5,6 +5,47 @@ All notable changes to the BTCPayServer Flash Plugin will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-10-06
+
+### Removed
+- `FlashSimpleInvoiceService`. It called `lnInvoiceCreate` (a BTC-wallet invoice, which Flash does not support) without a `walletId`, so every invoice first failed and fell back to `FlashInvoiceService`. Invoices are now created only through `FlashInvoiceService`.
+
+### Fixed
+- The LNURL-pay callback in `FlashLNURLController` used the same service with no fallback and always returned an error.
+
+## [1.6.4] - 2026-10-06
+
+### Fixed
+- Flash `PENDING` sends were reported to BTCPay as completed. They, and transport failures during a send, are now reported as unknown so the payout stays in progress. `ALREADY_PAID` is an error.
+- `GetPayment` guessed from recently submitted payments. It now reports the recorded outcome of the send, or Flash's status for that exact invoice, or pending.
+
+## [1.6.3] - 2026-10-06
+
+### Fixed
+- Sends failed with "insufficient balance. Current Balance: 0" on accounts moved to the USDT cash wallet. Requests now declare the `cash-wallet-usdt-v1` client capability, and the plugin uses the USDT wallet.
+
+## [1.6.2] - 2026-10-06
+
+### Fixed
+- Invoices were marked paid when any payment had been received in the last 10 minutes, so one card's payment could credit another. An invoice is now reported paid only when Flash's `lnInvoicePaymentStatus` confirms that exact invoice.
+- `settlementAmount` (cents) was read as dollars, so BTCPay recorded 100x the amount received. The amount received now comes from the invoice's payment request.
+- Sats-to-cents conversion rounded to nearest, which could leave invoices underpaid and never settled. It now rounds up.
+- `CreateInvoiceAsync(LightMoney, string, TimeSpan)` always threw (reflection with the wrong argument count).
+
+## [1.6.1] - 2026-10-06
+
+### Fixed
+- Wallet lookup failed when Flash returned a null balance for the BTC wallet.
+
+## [1.6.0] - 2026-10-06
+
+### Added
+- API keys from console.flashapp.me (`fk_...`), sent in the `X-API-KEY` header. Session tokens still use `Authorization: Bearer`.
+
+### Changed
+- With an API key the plugin polls for payments; Flash's WebSocket subscriptions accept session tokens only.
+- `X-API-KEY` is redacted in request logs.
+
 ## [1.5.1] - 2025-06-16
 
 ### Added
