@@ -108,33 +108,20 @@ namespace BTCPayServer.Plugins.Flash.Services
                 string actualPaymentHash = ExtractPaymentHashFromBolt11(bolt11);
                 _logger.LogInformation("[BOLTCARD PAYMENT] Extracted actual payment hash: {PaymentHash}", actualPaymentHash);
                 
-                // CRITICAL: For Boltcard payments, we need to track and immediately mark as paid after payment succeeds
-                // since BTCPayServer's Boltcard flow queries by payment hash
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await Task.Delay(2000); // Give payment time to process
-                        
-                        _logger.LogInformation("[BOLTCARD PAYMENT] Checking if Boltcard payment completed for payment hash: {PaymentHash}", actualPaymentHash);
-                        
-                        // Get invoice service from DI
-                        var invoiceService = _serviceProvider?.GetService<IFlashInvoiceService>();
-                        if (invoiceService != null && !string.IsNullOrEmpty(actualPaymentHash))
-                        {
-                            // For Boltcard payments, we need to mark the invoice as paid by its payment hash
-                            _logger.LogInformation("[BOLTCARD PAYMENT] Marking invoice {PaymentHash} as paid", actualPaymentHash);
-                            await invoiceService.MarkInvoiceAsPaidAsync(actualPaymentHash, decodedData.amount ?? 1000);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "[BOLTCARD PAYMENT] Error checking payment status");
-                    }
-                });
+                // Record the send before it goes out, so GetPayment can report on it exactly
+                if (Bolt11.TryParse(bolt11, out var sentHash, out var sentAmount))
+                    OutgoingPayments.Record(sentHash, bolt11!, sentAmount);
 
                 // Process payment with the appropriate mutation
                 var payResponse = await SendPaymentWithCorrectMutation(bolt11, walletInfo, payParams, cancellation);
+
+                if (!string.IsNullOrEmpty(sentHash))
+                {
+                    if (payResponse.Result == PayResult.Ok)
+                        OutgoingPayments.SetOutcome(sentHash, LightningPaymentStatus.Complete);
+                    else if (payResponse.Result != PayResult.Unknown)
+                        OutgoingPayments.SetOutcome(sentHash, LightningPaymentStatus.Failed);
+                }
 
                 // If payment was successful, notify that the invoice was paid
                 if (payResponse.Result == PayResult.Ok)
@@ -738,15 +725,22 @@ namespace BTCPayServer.Plugins.Flash.Services
                     var status = response.Data?.lnInvoicePaymentSend?.status;
                     _logger.LogInformation("[PAYMENT] Payment status: {Status}", status);
 
-                    if (status == "SUCCESS" || status == "PENDING")
+                    switch (status)
                     {
-                        _logger.LogInformation("[PAYMENT] Payment sent successfully!");
-                        return new PayResponse(PayResult.Ok);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("[PAYMENT] Payment failed with status: {Status}", status);
-                        return new PayResponse(PayResult.Error, $"Payment failed with status: {status}");
+                        case "SUCCESS":
+                            _logger.LogInformation("[PAYMENT] Payment sent successfully!");
+                            return new PayResponse(PayResult.Ok);
+                        case "PENDING":
+                            // Still in flight: BTCPay keeps the payout in progress and settles it via GetPayment
+                            _logger.LogInformation("[PAYMENT] Payment is pending; its outcome will come from GetPayment");
+                            return new PayResponse(PayResult.Unknown, "Payment is pending");
+                        case "ALREADY_PAID":
+                            // Someone may have paid this invoice before us; do not report it as our payment
+                            _logger.LogWarning("[PAYMENT] Invoice was already paid");
+                            return new PayResponse(PayResult.Error, "Invoice was already paid");
+                        default:
+                            _logger.LogWarning("[PAYMENT] Payment failed with status: {Status}", status);
+                            return new PayResponse(PayResult.Error, $"Payment failed with status: {status}");
                     }
                 }
                 else
@@ -757,8 +751,10 @@ namespace BTCPayServer.Plugins.Flash.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[PAYMENT] Error executing Lightning payment");
-                return new PayResponse(PayResult.Error, ex.Message);
+                // The request may have reached Flash before failing (e.g. a timeout), so the
+                // payment may have gone out. Report the outcome as unknown; GetPayment settles it.
+                _logger.LogError(ex, "[PAYMENT] Error executing Lightning payment; outcome unknown");
+                return new PayResponse(PayResult.Unknown, ex.Message);
             }
         }
 

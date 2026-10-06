@@ -345,6 +345,10 @@ namespace BTCPayServer.Plugins.Flash.Services
                                 }
                                 
                                 var oldStatus = pendingInvoice.Status;
+
+                                // Paid and expired invoices are settled; each check is an API call
+                                if (oldStatus != LightningInvoiceStatus.Unpaid)
+                                    continue;
                                 _logger.LogDebug($"[INVOICE DEBUG] Checking invoice {invoiceId} - Current status: {oldStatus}");
 
                                 // Try to get an updated status

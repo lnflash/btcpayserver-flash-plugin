@@ -86,12 +86,12 @@ namespace BTCPayServer.Plugins.Flash.Services
                 // If an HttpClient was provided, use it but ensure headers are set
                 _httpClient = httpClient;
                 _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                FlashAuth.Apply(_httpClient.DefaultRequestHeaders, _bearerToken);
             }
             else
             {
                 _httpClient = new HttpClient(finalHandler);
-                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                FlashAuth.Apply(_httpClient.DefaultRequestHeaders, _bearerToken);
             }
             
             // Log token info for debugging (first 10 chars only for security)
@@ -107,7 +107,7 @@ namespace BTCPayServer.Plugins.Flash.Services
 
             // Create an HttpClient with our handler chain for the GraphQL client
             var graphQLHttpClient = new HttpClient(finalHandler);
-            graphQLHttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            FlashAuth.Apply(graphQLHttpClient.DefaultRequestHeaders, _bearerToken);
 
             // Create the GraphQL client with our configured HttpClient
             _graphQLClient = new GraphQLHttpClient(options, new NewtonsoftJsonSerializer(), graphQLHttpClient);
@@ -272,29 +272,31 @@ namespace BTCPayServer.Plugins.Flash.Services
                     return null;
                 }
 
-                // Prioritize USD wallet, fallback to BTC
-                var wallet = response.Data.me.defaultAccount.wallets
-                    .FirstOrDefault(w => string.Equals(w.walletCurrency, "USD", StringComparison.OrdinalIgnoreCase))
-                    ?? response.Data.me.defaultAccount.wallets
-                    .FirstOrDefault(w => string.Equals(w.walletCurrency, "BTC", StringComparison.OrdinalIgnoreCase));
+                // Prefer the dollar wallet: USDT (the cash wallet after the USDT cutover), then the
+                // legacy USD wallet, then BTC. Both dollar wallets are denominated in cents and use
+                // the same USD mutations, so the plugin treats USDT as "USD".
+                var wallets = response.Data.me.defaultAccount.wallets;
+                var wallet = wallets.FirstOrDefault(w => string.Equals(w.walletCurrency, "USDT", StringComparison.OrdinalIgnoreCase))
+                    ?? wallets.FirstOrDefault(w => string.Equals(w.walletCurrency, "USD", StringComparison.OrdinalIgnoreCase))
+                    ?? wallets.FirstOrDefault(w => string.Equals(w.walletCurrency, "BTC", StringComparison.OrdinalIgnoreCase));
 
                 if (wallet != null)
                 {
                     _cachedWallet = new WalletInfo
                     {
                         Id = wallet.id,
-                        Currency = wallet.walletCurrency,
+                        Currency = string.Equals(wallet.walletCurrency, "USDT", StringComparison.OrdinalIgnoreCase) ? "USD" : wallet.walletCurrency,
                         Balance = wallet.balance
                     };
 
                     _walletCacheTime = DateTime.UtcNow;
-                    _logger.LogInformation("Found Flash wallet: ID={WalletId}, Currency={Currency}",
-                        _cachedWallet.Id, _cachedWallet.Currency);
+                    _logger.LogInformation("Found Flash wallet: ID={WalletId}, Currency={Currency} (Flash reports {FlashCurrency})",
+                        _cachedWallet.Id, _cachedWallet.Currency, wallet.walletCurrency);
 
                     return _cachedWallet;
                 }
 
-                _logger.LogWarning("[WALLET QUERY] No suitable wallet found. Total wallets: {Count}, Looking for USD or BTC", 
+                _logger.LogWarning("[WALLET QUERY] No suitable wallet found. Total wallets: {Count}, Looking for USDT, USD or BTC", 
                     response.Data.me.defaultAccount.wallets.Count);
                     
                 // Log all available wallets for debugging
@@ -568,70 +570,45 @@ namespace BTCPayServer.Plugins.Flash.Services
             }
         }
 
-        public async Task<InvoiceStatusResult?> GetInvoiceStatusAsync(string paymentHash, CancellationToken cancellation = default)
+        public async Task<InvoiceStatusResult?> GetInvoiceStatusAsync(string paymentRequest, CancellationToken cancellation = default)
         {
+            // Flash transactions carry no payment hash, so the only exact way to know whether a
+            // specific invoice was paid is to ask about that invoice's payment request.
+            if (string.IsNullOrEmpty(paymentRequest))
+                return null;
+
             try
             {
-                _logger.LogInformation("[INVOICE STATUS] Checking status for payment hash: {PaymentHash}", paymentHash);
-
-                // Get wallet info to check currency
-                var wallet = await GetWalletInfoAsync(cancellation);
-                bool isUsdWallet = wallet != null && string.Equals(wallet.Currency, "USD", StringComparison.OrdinalIgnoreCase);
-
-                // First, try to find the invoice in recent transactions by checking memo
-                var transactions = await GetTransactionHistoryAsync(100, cancellation);
-                
-                // Look for transactions that might be related to this payment hash
-                // Flash might include the payment hash in the memo or have a recent payment with matching timing
-                var recentPayments = transactions
-                    .Where(t => t.Direction == "RECEIVE" && 
-                               t.Status?.ToUpperInvariant() == "SUCCESS" &&
-                               t.CreatedAt >= DateTime.UtcNow.AddMinutes(-10))
-                    .OrderByDescending(t => t.CreatedAt)
-                    .ToList();
-
-                if (recentPayments.Any())
+                var query = new GraphQLRequest
                 {
-                    _logger.LogInformation("[INVOICE STATUS] Found {Count} recent successful payments, checking for matches", recentPayments.Count);
-                    
-                    // If we find a recent payment, assume it's for our invoice
-                    // This is a workaround since Flash doesn't provide direct payment hash lookup
-                    var mostRecent = recentPayments.First();
-                    
-                    // Convert USD to satoshis if this is a USD wallet
-                    decimal? amountInSats = mostRecent.SettlementAmount;
-                    if (isUsdWallet && amountInSats.HasValue)
-                    {
-                        // Get exchange rate and convert USD to satoshis
-                        // Note: Flash API returns settlementAmount in USD (not cents) for USD wallets
-                        var exchangeRate = await GetExchangeRateAsync(cancellation);
-                        if (exchangeRate > 0)
-                        {
-                            decimal usdAmount = amountInSats.Value; // Already in USD, not cents
-                            decimal btcAmount = usdAmount / exchangeRate; // Convert USD to BTC
-                            amountInSats = btcAmount * 100_000_000m; // Convert BTC to satoshis
-                            amountInSats = Math.Round(amountInSats.Value, 0); // Round to whole satoshis
-                            
-                            _logger.LogInformation("[INVOICE STATUS] Converted {Usd} USD to {Sats} satoshis using rate {Rate}", 
-                                mostRecent.SettlementAmount, amountInSats, exchangeRate);
-                        }
-                    }
-                    
-                    return new InvoiceStatusResult
-                    {
-                        PaymentHash = paymentHash,
-                        Status = "PAID",
-                        AmountReceived = amountInSats,
-                        PaidAt = mostRecent.CreatedAt
-                    };
+                    Query = @"
+                    query lnInvoicePaymentStatus($input: LnInvoicePaymentStatusInput!) {
+                      lnInvoicePaymentStatus(input: $input) {
+                        status
+                        errors { message }
+                      }
+                    }",
+                    OperationName = "lnInvoicePaymentStatus",
+                    Variables = new { input = new { paymentRequest } }
+                };
+
+                var response = await SendQueryAsync<InvoicePaymentStatusResponse>(query, cancellation);
+                var payload = response.Data?.lnInvoicePaymentStatus;
+
+                if (response.Errors?.Length > 0 || payload == null || payload.errors?.Count > 0 || string.IsNullOrEmpty(payload.status))
+                {
+                    var errors = string.Join("; ", (response.Errors?.Select(e => e.Message) ?? Enumerable.Empty<string>())
+                        .Concat(payload?.errors?.Select(e => e.message) ?? Enumerable.Empty<string>()));
+                    _logger.LogWarning("[INVOICE STATUS] Flash could not report status for {PaymentRequest}...: {Errors}",
+                        paymentRequest.Substring(0, Math.Min(20, paymentRequest.Length)), errors);
+                    return null;
                 }
 
-                _logger.LogInformation("[INVOICE STATUS] No matching payment found for hash: {PaymentHash}", paymentHash);
-                return null;
+                return new InvoiceStatusResult { Status = payload.status };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error checking invoice status for payment hash: {PaymentHash}", paymentHash);
+                _logger.LogError(ex, "[INVOICE STATUS] Error checking invoice status");
                 return null;
             }
         }
@@ -647,6 +624,22 @@ namespace BTCPayServer.Plugins.Flash.Services
         }
 
         #region Response Classes
+
+        private class InvoicePaymentStatusResponse
+        {
+            public StatusPayload? lnInvoicePaymentStatus { get; set; }
+
+            public class StatusPayload
+            {
+                public string? status { get; set; }
+                public List<ErrorData>? errors { get; set; }
+            }
+
+            public class ErrorData
+            {
+                public string message { get; set; } = null!;
+            }
+        }
 
         private class WalletQueryResponse
         {
@@ -666,7 +659,7 @@ namespace BTCPayServer.Plugins.Flash.Services
             {
                 public string id { get; set; } = null!;
                 public string walletCurrency { get; set; } = null!;
-                public decimal balance { get; set; }
+                public decimal? balance { get; set; }
             }
         }
 

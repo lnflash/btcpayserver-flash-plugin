@@ -144,7 +144,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                         "application/json")
                 };
 
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearerToken);
+                FlashAuth.Apply(request.Headers, bearerToken);
 
                 var response = await _httpClient.SendAsync(request, cancellationToken);
 

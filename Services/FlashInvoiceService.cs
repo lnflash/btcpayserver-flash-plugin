@@ -149,15 +149,7 @@ namespace BTCPayServer.Plugins.Flash.Services
             TimeSpan expiry,
             CancellationToken cancellation = default)
         {
-            // Create the params manually without using the constructor
-            var parameters = typeof(CreateInvoiceParams).GetConstructors()[0].Invoke(new object[] { });
-            var createParams = (CreateInvoiceParams)parameters;
-
-            // Set properties manually
-            typeof(CreateInvoiceParams).GetProperty("Amount")?.SetValue(createParams, amount);
-            typeof(CreateInvoiceParams).GetProperty("Description")?.SetValue(createParams, description);
-            typeof(CreateInvoiceParams).GetProperty("Expiry")?.SetValue(createParams, expiry);
-
+            var createParams = new CreateInvoiceParams(amount, description, expiry);
             return await CreateInvoiceAsync(createParams, cancellation);
         }
 
@@ -165,239 +157,71 @@ namespace BTCPayServer.Plugins.Flash.Services
             string invoiceId,
             CancellationToken cancellation = default)
         {
-            try
+            CleanupOldPendingInvoices();
+
+            var verified = await GetVerifiedInvoiceAsync(invoiceId, cancellation);
+            if (verified != null)
+                return verified;
+
+            // Without the invoice's payment request we cannot ask Flash about it, and guessing
+            // from recent transactions can credit the wrong invoice. Report it as unpaid.
+            LightningInvoice? cached;
+            lock (_invoiceTrackingLock)
             {
-                _logger.LogInformation("[BOLTCARD] GetInvoiceAsync called for {InvoiceId}", invoiceId);
+                _pendingInvoices.TryGetValue(invoiceId, out cached);
+            }
 
-                // Occasionally clean up old pending invoices
-                CleanupOldPendingInvoices();
-
-                // First check if this is a pending invoice we're tracking
-                if (_pendingInvoices.TryGetValue(invoiceId, out var pendingInvoice))
-                {
-                    _logger.LogInformation("[BOLTCARD] Found invoice {InvoiceId} in pending cache, Status: {Status}", 
-                        invoiceId, pendingInvoice.Status);
-
-                    // If it's been less than 10 seconds since creation, just return it as is
-                    // This gives the API time to index the new transaction
-                    var timeSinceCreation = DateTime.UtcNow - _invoiceCreationTimes[invoiceId];
-                    if (timeSinceCreation.TotalSeconds < 10)
-                    {
-                        _logger.LogInformation("Invoice {InvoiceId} was recently created ({TimeSinceCreation:F1}s ago), returning cached status",
-                            invoiceId, timeSinceCreation.TotalSeconds);
-                        return pendingInvoice;
-                    }
-                }
-
-                // Check if this might be a Boltcard/LNURL invoice that we haven't seen before
-                if (!_pendingInvoices.ContainsKey(invoiceId))
-                {
-                    _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} not in cache - this is likely a Boltcard/LNURL invoice", invoiceId);
-                    
-                    // For Boltcard invoices, we need to aggressively check payment status
-                    // because BTCPayServer expects immediate updates
-                    
-                    // First, check recent transactions to see if this was just paid
-                    var recentTransactions = await _graphQLService.GetTransactionHistoryAsync(10, cancellation);
-                    var matchingTx = recentTransactions.FirstOrDefault(t => 
-                        t.Id == invoiceId || 
-                        (t.Memo != null && t.Memo.Contains(invoiceId)) ||
-                        (t.CreatedAt > DateTime.UtcNow.AddMinutes(-1) && Math.Abs(t.SettlementAmount ?? 0) < 1000));
-                    
-                    if (matchingTx != null && matchingTx.Status?.ToLowerInvariant() == "success")
-                    {
-                        _logger.LogInformation("[BOLTCARD] Found matching paid transaction for invoice {InvoiceId}! Amount: {Amount} sats", 
-                            invoiceId, Math.Abs(matchingTx.SettlementAmount ?? 0));
-                        
-                        var paidInvoice = new LightningInvoice
-                        {
-                            Id = invoiceId,
-                            PaymentHash = invoiceId,
-                            Status = LightningInvoiceStatus.Paid,
-                            Amount = LightMoney.Satoshis(Math.Abs(matchingTx.SettlementAmount ?? 0)),
-                            AmountReceived = LightMoney.Satoshis(Math.Abs(matchingTx.SettlementAmount ?? 0)),
-                            PaidAt = new DateTimeOffset(matchingTx.CreatedAt, TimeSpan.Zero),
-                            ExpiresAt = DateTime.UtcNow.AddDays(1)
-                        };
-                        
-                        // CRITICAL: Notify BTCPayServer immediately
-                        lock (_invoiceTrackingLock)
-                        {
-                            _pendingInvoices[invoiceId] = paidInvoice;
-                            _invoiceCreationTimes[invoiceId] = DateTime.UtcNow;
-                        }
-                        
-                        await MarkInvoiceAsPaidAsync(invoiceId, (long)Math.Abs(matchingTx.SettlementAmount ?? 0));
-                        
-                        return paidInvoice;
-                    }
-                    
-                    // If not found in recent transactions, create a tracking entry
-                    var potentialBoltcardInvoice = new LightningInvoice
-                    {
-                        Id = invoiceId,
-                        PaymentHash = invoiceId,
-                        Status = LightningInvoiceStatus.Unpaid,
-                        Amount = LightMoney.Satoshis(1000), // Default amount
-                        ExpiresAt = DateTime.UtcNow.AddMinutes(10),
-                        BOLT11 = "" // We don't have the BOLT11 yet
-                    };
-                    
-                    // Add to tracking
-                    lock (_invoiceTrackingLock)
-                    {
-                        _pendingInvoices[invoiceId] = potentialBoltcardInvoice;
-                        _invoiceCreationTimes[invoiceId] = DateTime.UtcNow;
-                    }
-                    
-                    _logger.LogInformation("[BOLTCARD] Added potential Boltcard invoice {InvoiceId} to tracking for monitoring", invoiceId);
-                    
-                    // Start aggressive monitoring for this invoice
-                    _ = Task.Run(async () => 
-                    {
-                        for (int i = 0; i < 10; i++) // Check for 20 seconds
-                        {
-                            await Task.Delay(2000);
-                            
-                            var status = await _graphQLService.GetInvoiceStatusAsync(invoiceId, cancellation);
-                            if (status != null && status.IsPaid)
-                            {
-                                _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} detected as PAID in monitoring loop!", invoiceId);
-                                await MarkInvoiceAsPaidAsync(invoiceId, (long)(status.AmountReceived ?? 1000));
-                                break;
-                            }
-                            
-                            // Also check transaction history
-                            var txs = await _graphQLService.GetTransactionHistoryAsync(5, cancellation);
-                            var paidTx = txs.FirstOrDefault(t => 
-                                (t.Id == invoiceId || (t.Memo != null && t.Memo.Contains(invoiceId))) && 
-                                t.Status?.ToLowerInvariant() == "success");
-                                
-                            if (paidTx != null)
-                            {
-                                _logger.LogInformation("[BOLTCARD] Found paid transaction for {InvoiceId} in monitoring loop!", invoiceId);
-                                await MarkInvoiceAsPaidAsync(invoiceId, (long)Math.Abs(paidTx.SettlementAmount ?? 0));
-                                break;
-                            }
-                        }
-                    });
-                }
-
-                // First, try to get invoice status directly by payment hash
-                var invoiceStatus = await _graphQLService.GetInvoiceStatusAsync(invoiceId, cancellation);
-                if (invoiceStatus != null && invoiceStatus.IsPaid)
-                {
-                    _logger.LogInformation("[BOLTCARD] Invoice {InvoiceId} is PAID according to Flash API (second check)", invoiceId);
-                    
-                    var paidInvoice = new LightningInvoice
-                    {
-                        Id = invoiceId,
-                        PaymentHash = invoiceId,
-                        Status = LightningInvoiceStatus.Paid,
-                        Amount = pendingInvoice?.Amount,
-                        AmountReceived = invoiceStatus.AmountReceived.HasValue 
-                            ? LightMoney.Satoshis(Math.Abs(invoiceStatus.AmountReceived.Value))
-                            : pendingInvoice?.Amount ?? LightMoney.Zero,
-                        PaidAt = invoiceStatus.PaidAt.HasValue 
-                            ? new DateTimeOffset(invoiceStatus.PaidAt.Value, TimeSpan.Zero)
-                            : DateTimeOffset.UtcNow,
-                        ExpiresAt = pendingInvoice?.ExpiresAt ?? DateTime.UtcNow.AddDays(1)
-                    };
-
-                    // Update BOLT11 from cache if available
-                    if (pendingInvoice != null)
-                    {
-                        paidInvoice.BOLT11 = pendingInvoice.BOLT11;
-                    }
-
-                    // Update our cache
-                    lock (_invoiceTrackingLock)
-                    {
-                        _pendingInvoices[invoiceId] = paidInvoice;
-                    }
-
-                    // CRITICAL: Mark the invoice as paid to trigger Boltcard credit
-                    var amountSats = paidInvoice.AmountReceived != null 
-                        ? (long)(paidInvoice.AmountReceived.MilliSatoshi / 1000) 
-                        : 0;
-                    await MarkInvoiceAsPaidAsync(invoiceId, amountSats);
-
-                    return paidInvoice;
-                }
-
-                // Fallback to transaction history search
-                var walletInfo = await _graphQLService.GetWalletInfoAsync(cancellation);
-                if (walletInfo == null)
-                {
-                    _logger.LogWarning("Cannot get invoice status: No wallet found");
-
-                    // If we have a pending invoice, return that
-                    if (pendingInvoice != null)
-                    {
-                        _logger.LogInformation("Returning cached invoice {InvoiceId} since no wallet was found", invoiceId);
-                        return pendingInvoice;
-                    }
-
-                    return CreateDefaultUnpaidInvoice(invoiceId);
-                }
-
-                // Get transaction history to find matching invoice
-                var transactions = await _graphQLService.GetTransactionHistoryAsync(50, cancellation);
-
-                // Find the transaction matching our ID or containing it in the memo
-                var matchingTransaction = transactions.FirstOrDefault(t =>
-                    t.Id == invoiceId ||
-                    (t.Memo != null && t.Memo.Contains(invoiceId)));
-
-                if (matchingTransaction != null)
-                {
-                    var invoice = CreateInvoiceFromTransaction(invoiceId, matchingTransaction);
-
-                    // If we have a pending invoice, update BOLT11 from our cache
-                    if (pendingInvoice != null)
-                    {
-                        invoice.BOLT11 = pendingInvoice.BOLT11;
-
-                        // Update our cache with the latest status
-                        if (invoice.Status != pendingInvoice.Status)
-                        {
-                            _logger.LogInformation("Updating cached invoice {InvoiceId} status from {OldStatus} to {NewStatus}",
-                                invoiceId, pendingInvoice.Status, invoice.Status);
-
-                            lock (_invoiceTrackingLock)
-                            {
-                                _pendingInvoices[invoiceId] = invoice;
-                            }
-                        }
-                    }
-
-                    return invoice;
-                }
-
-                _logger.LogWarning("Transaction {InvoiceId} not found in Flash API", invoiceId);
-
-                // Return our pending invoice if available
-                if (pendingInvoice != null)
-                {
-                    _logger.LogInformation("Returning cached invoice {InvoiceId} because no matching transaction was found", invoiceId);
-                    return pendingInvoice;
-                }
-
+            if (cached == null)
+            {
+                _logger.LogInformation("[INVOICE STATUS] Invoice {InvoiceId} was not created by this plugin instance; reporting unpaid", invoiceId);
                 return CreateDefaultUnpaidInvoice(invoiceId);
             }
-            catch (Exception ex)
+
+            return CopyInvoice(cached, cached.Status == LightningInvoiceStatus.Paid ? LightningInvoiceStatus.Unpaid : cached.Status, null);
+        }
+
+        public async Task<LightningInvoice?> GetVerifiedInvoiceAsync(string invoiceId, CancellationToken cancellation = default)
+        {
+            LightningInvoice? cached;
+            lock (_invoiceTrackingLock)
             {
-                _logger.LogError(ex, "Error retrieving invoice {InvoiceId}", invoiceId);
-
-                // If we have a pending invoice, return that in case of error
-                if (_pendingInvoices.TryGetValue(invoiceId, out var pendingInvoice))
-                {
-                    _logger.LogInformation("Returning cached invoice {InvoiceId} due to error", invoiceId);
-                    return pendingInvoice;
-                }
-
-                throw;
+                _pendingInvoices.TryGetValue(invoiceId, out cached);
             }
+
+            if (cached == null || string.IsNullOrEmpty(cached.BOLT11))
+                return null;
+
+            var status = await _graphQLService.GetInvoiceStatusAsync(cached.BOLT11, cancellation);
+            if (status == null)
+                return null;
+
+            LightningInvoice result;
+            switch (status.Status.ToUpperInvariant())
+            {
+                case "PAID":
+                    var received = GetBolt11Amount(cached.BOLT11) ?? cached.Amount;
+                    result = CopyInvoice(cached, LightningInvoiceStatus.Paid, received);
+                    result.PaidAt = cached.PaidAt ?? DateTimeOffset.UtcNow;
+                    break;
+                case "EXPIRED":
+                    result = CopyInvoice(cached, LightningInvoiceStatus.Expired, null);
+                    break;
+                default:
+                    result = CopyInvoice(cached, LightningInvoiceStatus.Unpaid, null);
+                    break;
+            }
+
+            if (result.Status != cached.Status)
+            {
+                _logger.LogInformation("[INVOICE STATUS] Invoice {InvoiceId} is {Status} according to Flash (amount received: {Received})",
+                    invoiceId, result.Status, result.AmountReceived?.ToString() ?? "-");
+                lock (_invoiceTrackingLock)
+                {
+                    _pendingInvoices[invoiceId] = result;
+                }
+            }
+
+            return result;
         }
 
         public async Task<LightningInvoice> GetInvoiceAsync(
@@ -452,70 +276,24 @@ namespace BTCPayServer.Plugins.Flash.Services
 
         public async Task MarkInvoiceAsPaidAsync(string paymentHash, long amountSats, string? boltcardId = null)
         {
+            // Callers detect "probably paid" from transaction history or outgoing payments, which
+            // cannot identify the invoice. Only record the payment once Flash confirms this invoice.
             try
             {
-                // Update our internal tracking with thread safety
-                LightningInvoice? paidInvoice = null;
-                lock (_invoiceTrackingLock)
+                var verified = await GetVerifiedInvoiceAsync(paymentHash, CancellationToken.None);
+                if (verified?.Status == LightningInvoiceStatus.Paid)
                 {
-                    if (_pendingInvoices.TryGetValue(paymentHash, out var invoice))
-                    {
-                        paidInvoice = new LightningInvoice
-                        {
-                            Id = invoice.Id,
-                            PaymentHash = invoice.PaymentHash,
-                            BOLT11 = invoice.BOLT11,
-                            Status = LightningInvoiceStatus.Paid,
-                            Amount = invoice.Amount,
-                            AmountReceived = LightMoney.Satoshis(amountSats),
-                            ExpiresAt = invoice.ExpiresAt,
-                            PaidAt = DateTimeOffset.UtcNow
-                        };
-
-                        _pendingInvoices[paymentHash] = paidInvoice;
-                        _logger.LogInformation("Marked invoice as paid: {PaymentHash}", paymentHash);
-                    }
-                }
-
-                // 🎯 CRITICAL: Notify BTCPay Server's Lightning listener that invoice was paid
-                // This is what actually credits the Boltcard!
-                System.Threading.Channels.Channel<LightningInvoice>? listener = null;
-                lock (_invoiceTrackingLock)
-                {
-                    listener = _currentInvoiceListener;
-                }
-
-                if (paidInvoice != null && listener != null)
-                {
-                    _logger.LogInformation("NOTIFYING BTCPAY SERVER: Invoice {PaymentHash} paid for {AmountSats} sats - This should credit the Boltcard!",
-                        paymentHash, amountSats);
-
-                    try
-                    {
-                        var notified = listener.Writer.TryWrite(paidInvoice);
-                        if (notified)
-                        {
-                            _logger.LogInformation("SUCCESS: BTCPay Server notified about paid invoice {PaymentHash} - Boltcard should be credited!", paymentHash);
-                        }
-                        else
-                        {
-                            _logger.LogError("FAILED: Could not notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "ERROR: Failed to notify BTCPay Server about paid invoice {PaymentHash} - Boltcard will NOT be credited!", paymentHash);
-                    }
+                    _logger.LogInformation("Invoice {PaymentHash} confirmed paid by Flash ({Received})", paymentHash, verified.AmountReceived);
                 }
                 else
                 {
-                    _logger.LogWarning("MISSING: No invoice listener available to notify BTCPay Server - Boltcard will NOT be credited! (paidInvoice: {HasInvoice}, listener: {HasListener})",
-                        paidInvoice != null, listener != null);
+                    _logger.LogInformation("Ignoring unconfirmed paid signal for invoice {PaymentHash} (Flash status: {Status})",
+                        paymentHash, verified?.Status.ToString() ?? "unknown");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error marking invoice as paid: {PaymentHash}", paymentHash);
+                _logger.LogError(ex, "Error confirming invoice payment: {PaymentHash}", paymentHash);
             }
         }
 
@@ -585,7 +363,9 @@ namespace BTCPayServer.Plugins.Flash.Services
                 decimal amountUsdCents = await _exchangeRateService.ConvertSatoshisToUsdCentsAsync(amountSats, cancellation);
 
                 // Round to whole cents for Flash API compatibility
-                amountUsdCents = Math.Round(amountUsdCents, 0, MidpointRounding.AwayFromZero);
+                // Round up so the invoice is never worth less than BTCPay asked for; rounding down
+                // would leave the BTCPay invoice underpaid and never settled.
+                amountUsdCents = Math.Ceiling(amountUsdCents);
 
                 _logger.LogInformation("Converting {AmountSats} sats to {AmountUsdCents} USD cents for invoice creation using current exchange rate",
                     amountSats, amountUsdCents);
@@ -705,39 +485,28 @@ namespace BTCPayServer.Plugins.Flash.Services
             return lightningInvoice;
         }
 
-        private LightningInvoice CreateInvoiceFromTransaction(string invoiceId, TransactionInfo transaction)
+        private static LightningInvoice CopyInvoice(LightningInvoice source, LightningInvoiceStatus status, LightMoney? amountReceived)
         {
-            var amount = transaction.SettlementAmount != null
-                ? new LightMoney(Math.Abs(transaction.SettlementAmount.Value), LightMoneyUnit.Satoshi)
-                : LightMoney.Satoshis(0);
-
-            var status = transaction.Status?.ToLowerInvariant() switch
+            return new LightningInvoice
             {
-                "success" => LightningInvoiceStatus.Paid,
-                "complete" => LightningInvoiceStatus.Paid,
-                "pending" => LightningInvoiceStatus.Unpaid,
-                "expired" => LightningInvoiceStatus.Expired,
-                "cancelled" => LightningInvoiceStatus.Expired,
-                _ => LightningInvoiceStatus.Unpaid
-            };
-
-            var invoice = new LightningInvoice
-            {
-                Id = invoiceId,
-                PaymentHash = invoiceId, // Use invoiceId as PaymentHash
+                Id = source.Id,
+                PaymentHash = source.PaymentHash ?? source.Id,
+                BOLT11 = source.BOLT11,
+                Amount = source.Amount,
+                ExpiresAt = source.ExpiresAt,
                 Status = status,
-                Amount = amount,
-                ExpiresAt = transaction.CreatedAt.AddDays(1)
+                AmountReceived = amountReceived ?? LightMoney.Zero,
+                PaidAt = status == LightningInvoiceStatus.Paid ? source.PaidAt : null
             };
+        }
 
-            // Set AmountReceived if the invoice is paid
-            if (status == LightningInvoiceStatus.Paid)
-            {
-                _logger.LogInformation("Setting AmountReceived for paid invoice: {InvoiceId}", invoiceId);
-                invoice.AmountReceived = amount;
-            }
+        private LightMoney? GetBolt11Amount(string bolt11)
+        {
+            if (Bolt11.TryParse(bolt11, out _, out var amount))
+                return amount;
 
-            return invoice;
+            _logger.LogWarning("Could not read the amount from invoice {Bolt11Prefix}...", bolt11.Substring(0, Math.Min(20, bolt11.Length)));
+            return null;
         }
 
         private LightningInvoice CreateDefaultUnpaidInvoice(string invoiceId)

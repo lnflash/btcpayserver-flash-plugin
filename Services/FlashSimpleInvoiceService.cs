@@ -35,7 +35,7 @@ namespace BTCPayServer.Plugins.Flash.Services
                 _bearerToken.Length > 10 ? _bearerToken.Substring(0, 10) + "..." : _bearerToken,
                 _bearerToken.Length);
             
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            FlashAuth.Apply(_httpClient.DefaultRequestHeaders, _bearerToken);
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "BTCPayServer-Flash-Plugin/1.0");
             
@@ -50,6 +50,11 @@ namespace BTCPayServer.Plugins.Flash.Services
                         var token = authValue.Substring(7);
                         return $"{h.Key}=Bearer {token.Substring(0, Math.Min(10, token.Length))}...";
                     }
+                }
+                if (h.Key == FlashAuth.ApiKeyHeader && h.Value.Any())
+                {
+                    var key = h.Value.First();
+                    return $"{h.Key}={key.Substring(0, Math.Min(10, key.Length))}...";
                 }
                 return $"{h.Key}={string.Join(",", h.Value)}";
             });
@@ -109,7 +114,8 @@ namespace BTCPayServer.Plugins.Flash.Services
                 _logger.LogInformation("[SimpleInvoice] Request URL: {Endpoint}", _endpoint);
                 _logger.LogInformation("[SimpleInvoice] Request Body: {Request}", json);
                 // Log authorization header with masked token
-                var authHeader = _httpClient.DefaultRequestHeaders.Authorization?.ToString() ?? "NOT SET";
+                var authHeader = _httpClient.DefaultRequestHeaders.Authorization?.ToString()
+                    ?? (FlashAuth.IsApiKey(_bearerToken) ? $"{FlashAuth.ApiKeyHeader} {_bearerToken.Substring(0, Math.Min(10, _bearerToken.Length))}..." : "NOT SET");
                 if (authHeader.StartsWith("Bearer "))
                 {
                     var token = authHeader.Substring(7);
