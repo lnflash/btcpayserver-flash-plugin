@@ -19,17 +19,16 @@ PACKAGE_DIR=$OUT/package
     exit 1
 }
 
-rm -rf "$PUBLISH_DIR" "$PACKAGE_DIR"
+rm -rf "$PUBLISH_DIR" "$PACKER_DIR" "$PACKAGE_DIR"
 
 dotnet restore "$PROJECT.csproj" --property:Configuration="$CONFIG"
 dotnet publish "$PROJECT.csproj" --configuration "$CONFIG" --no-restore --output "$PUBLISH_DIR"
 
-if [ ! -x "$PACKER_DIR/BTCPayServer.PluginPacker" ]; then
-    dotnet build "$PACKER_SRC/BTCPayServer.PluginPacker.csproj" -c Release -o "$PACKER_DIR"
-fi
+# Always rebuild the packer from the pinned submodule so a submodule bump can never
+# leave a stale packer behind (the dir is wiped above). Incremental build is cheap.
+dotnet build "$PACKER_SRC/BTCPayServer.PluginPacker.csproj" -c Release -o "$PACKER_DIR"
 
-# The packer targets .NET 8; let it run on whatever newer runtime the SDK image ships.
-DOTNET_ROLL_FORWARD=Major "$PACKER_DIR/BTCPayServer.PluginPacker" "$PUBLISH_DIR" "$PROJECT" "$PACKAGE_DIR"
+"$PACKER_DIR/BTCPayServer.PluginPacker" "$PUBLISH_DIR" "$PROJECT" "$PACKAGE_DIR"
 
 # PluginPacker writes <version>/<name>.btcpay; expose it at a stable path for releases.
 PKG=$(find "$PACKAGE_DIR" -name "$PROJECT.btcpay" | head -1)

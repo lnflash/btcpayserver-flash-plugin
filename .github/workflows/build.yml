@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -25,3 +28,18 @@ jobs:
           path: |
             bin/Release/BTCPayServer.Plugins.Flash.btcpay
             bin/Release/package/**/*.btcpay.json
+      - name: Extract release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          sed -n "/## \[${VER}\]/,/## \[/p" CHANGELOG.md | sed '$d' > release-notes.md
+          test -s release-notes.md || echo "No CHANGELOG entry for ${VER}" >&2
+      - name: Attach package to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            bin/Release/BTCPayServer.Plugins.Flash.btcpay
+            bin/Release/package/*/*/BTCPayServer.Plugins.Flash.btcpay.json

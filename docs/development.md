@@ -85,12 +85,13 @@ The builder does a shallow recursive clone and runs `dotnet publish` in a `dotne
    | `FlashPlugin.cs` | `override Version` |
 
 2. Add an entry to [CHANGELOG.md](../CHANGELOG.md).
-3. Build the package, then publish it as a GitHub release. Keep the asset name exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
+3. Push the tag. CI ([`.github/workflows/build.yml`](../.github/workflows/build.yml)) builds the package in the same `dotnet/sdk:10.0` image the Plugin Builder uses, creates the GitHub release (notes from the matching CHANGELOG section) and attaches `BTCPayServer.Plugins.Flash.btcpay` plus its `.btcpay.json` manifest. The asset name must stay exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
 
    ```sh
-   gh release create v1.7.0 bin/Release/BTCPayServer.Plugins.Flash.btcpay \
-     --title "v1.7.0" --notes-file <(sed -n '/## \[1.7.0\]/,/## \[/p' CHANGELOG.md | sed '$d')
+   git tag v1.7.0 && git push origin v1.7.0
    ```
+
+   Do not upload a laptop-built package to the release; the CI artifact is the one users install, so what ships is reproducible from the tag.
 
 Packages are not committed to the repository. `bin/` and `obj/` are ignored.
 
