@@ -31,6 +31,7 @@ dotnet build "$PACKER_SRC/BTCPayServer.PluginPacker.csproj" -c Release -o "$PACK
 "$PACKER_DIR/BTCPayServer.PluginPacker" "$PUBLISH_DIR" "$PROJECT" "$PACKAGE_DIR"
 
 # PluginPacker writes <version>/<name>.btcpay; expose it at a stable path for releases.
-PKG=$(find "$PACKAGE_DIR" -name "$PROJECT.btcpay" | head -1)
+PKG=$(find "$PACKAGE_DIR" -name "$PROJECT.btcpay" -print -quit)
+[ -n "$PKG" ] || { echo "PluginPacker produced no $PROJECT.btcpay under $PACKAGE_DIR" >&2; exit 1; }
 cp "$PKG" "$OUT/$PROJECT.btcpay"
 echo "Plugin package created at $OUT/$PROJECT.btcpay"

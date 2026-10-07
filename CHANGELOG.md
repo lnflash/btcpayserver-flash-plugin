@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Microsoft.EntityFrameworkCore.InMemory` 8.0.0 to 10.0.12 to match the EF Core version BTCPay 2.4 ships.
 - Declared BTCPay dependency is `>=2.4.0` (was `>=2.0.0`).
 
+- The package no longer carries loose copies of `Views/*.cshtml`. The Razor SDK compiles them into the plugin assembly; the copies were never read.
+
 ### Fixed
 - `.DS_Store` files are no longer packaged from `wwwroot/`.
 

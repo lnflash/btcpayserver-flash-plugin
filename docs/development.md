@@ -23,7 +23,7 @@ Start with `Lightning/FlashLightningClient.cs`, which BTCPay calls. It delegates
 
 ## Building
 
-The project targets **.NET 10** and references the BTCPay Server source through the git submodule at `submodules/btcpayserver`, pinned to **v2.4.5**. Any BTCPay 2.4.x tag works; 2.3 and earlier target .NET 8 and will not build this project (use the `v1.6.6` tag for those).
+The project targets **.NET 10** and references the BTCPay Server source through the git submodule at `submodules/btcpayserver`, pinned to **v2.4.5**, the version it is built and smoke-tested against. BTCPay 2.3 and earlier target .NET 8 and will not build this project (use the `v1.6.6` tag for those).
 
 ```sh
 git clone --recurse-submodules https://github.com/lnflash/btcpayserver-flash-plugin.git

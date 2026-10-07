@@ -10,10 +10,23 @@ CHANGELOG="${3:-CHANGELOG.md}"
 OUT="${4:-release-notes.md}"
 VER="${TAG#v}"
 
-# PluginPacker writes <name>/<Version>/<name>.btcpay, where <Version> is the compiled
-# assembly version, so this one check covers both the csproj and FlashPlugin.cs.
+# PluginPacker writes <name>/<Version>/<name>.btcpay, where <Version> comes from
+# FlashPlugin.Version (the value BTCPay reads at runtime). This checks that one.
 if [ ! -d "$PACKAGE_DIR/$VER" ]; then
     echo "Tag ${TAG} does not match packaged version $(ls "$PACKAGE_DIR" 2>/dev/null || echo '<none>')" >&2
+    exit 1
+fi
+
+# The csproj <Version> (assembly metadata) and manifest.json are kept in step by hand;
+# check them too so a half-done bump cannot ship.
+CSPROJ="${CSPROJ:-BTCPayServer.Plugins.Flash.csproj}"
+MANIFEST="${MANIFEST:-manifest.json}"
+if [ -f "$CSPROJ" ] && ! grep -q "<Version>${VER}</Version>" "$CSPROJ"; then
+    echo "${CSPROJ} <Version> does not match tag ${TAG}" >&2
+    exit 1
+fi
+if [ -f "$MANIFEST" ] && ! grep -q "\"version\": \"${VER}\"" "$MANIFEST"; then
+    echo "${MANIFEST} version does not match tag ${TAG}" >&2
     exit 1
 fi
 
