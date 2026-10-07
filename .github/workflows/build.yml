@@ -1,0 +1,27 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/dotnet/sdk:10.0
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build .btcpay the way the Plugin Builder does
+        run: ./build-package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BTCPayServer.Plugins.Flash.btcpay
+          path: |
+            bin/Release/BTCPayServer.Plugins.Flash.btcpay
+            bin/Release/package/**/*.btcpay.json

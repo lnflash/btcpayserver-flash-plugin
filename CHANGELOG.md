@@ -5,6 +5,18 @@ All notable changes to the BTCPayServer Flash Plugin will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-07
+
+### Changed
+- Built for **.NET 10 / BTCPay Server 2.4.0+**. BTCPay moved to .NET 10 in 2.4.0; this release follows. v1.6.6 remains the last release for BTCPay 2.0 to 2.3.
+- BTCPay Server is now a git submodule at `submodules/btcpayserver` (pinned to v2.4.5) instead of a sibling checkout, so the repository builds from a plain `git clone --recurse-submodules`. This is the layout the [BTCPay Plugin Builder](https://plugin-builder.btcpayserver.org) expects.
+- `build-package.sh` now uses `dotnet publish` plus BTCPay's own `PluginPacker`, the same steps the Plugin Builder runs, so a local package matches a builder-produced one.
+- `Microsoft.EntityFrameworkCore.InMemory` 8.0.0 to 10.0.12 to match the EF Core version BTCPay 2.4 ships.
+- Declared BTCPay dependency is `>=2.4.0` (was `>=2.0.0`).
+
+### Fixed
+- `.DS_Store` files are no longer packaged from `wwwroot/`.
+
 ## [1.6.6] - 2026-10-06
 
 ### Removed

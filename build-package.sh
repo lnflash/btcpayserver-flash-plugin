@@ -1,49 +1,37 @@
 #!/bin/bash
+# Builds BTCPayServer.Plugins.Flash.btcpay the same way the BTCPay Plugin Builder does:
+# dotnet publish, then BTCPay's PluginPacker. Requires the submodule to be checked out:
+#   git submodule update --init --depth 1
+set -euo pipefail
 
-# Exit on error
-set -e
+cd "$(dirname "$0")"
 
-# Clean any previous build
-rm -rf bin/Release
+CONFIG="${BUILD_CONFIG:-Release}"
+PROJECT=BTCPayServer.Plugins.Flash
+PACKER_SRC=submodules/btcpayserver/BTCPayServer.PluginPacker
+OUT=bin/$CONFIG
+PUBLISH_DIR=$OUT/publish
+PACKER_DIR=$OUT/packer
+PACKAGE_DIR=$OUT/package
 
-# Build the plugin
-dotnet build -c Release
-dotnet publish -c Release -o bin/Release/publish
+[ -f "$PACKER_SRC/BTCPayServer.PluginPacker.csproj" ] || {
+    echo "submodules/btcpayserver is empty. Run: git submodule update --init --depth 1" >&2
+    exit 1
+}
 
-# Set up plugin directories
-PLUGIN_DIR="BTCPayServer.Plugins.Flash"
-PACKAGE_DIR="bin/Release/package"
-rm -rf $PACKAGE_DIR
-mkdir -p $PACKAGE_DIR
+rm -rf "$PUBLISH_DIR" "$PACKAGE_DIR"
 
-# Copy all files to the package directory
-cp bin/Release/publish/*.dll $PACKAGE_DIR/
-cp bin/Release/publish/*.pdb $PACKAGE_DIR/
-cp bin/Release/publish/*.json $PACKAGE_DIR/
-cp manifest.json $PACKAGE_DIR/
-cp manifest.json $PACKAGE_DIR/BTCPayServer.Plugins.Flash.json
+dotnet restore "$PROJECT.csproj" --property:Configuration="$CONFIG"
+dotnet publish "$PROJECT.csproj" --configuration "$CONFIG" --no-restore --output "$PUBLISH_DIR"
 
-# Copy Views files if they exist
-# Currently no views are included as the UI has been removed for rebuild
-if [ -f "_ViewImports.cshtml" ]; then
-    cp _ViewImports.cshtml $PACKAGE_DIR/
+if [ ! -x "$PACKER_DIR/BTCPayServer.PluginPacker" ]; then
+    dotnet build "$PACKER_SRC/BTCPayServer.PluginPacker.csproj" -c Release -o "$PACKER_DIR"
 fi
 
-# Copy any remaining view files if needed
-if [ -d "Views" ] && [ "$(ls -A Views)" ]; then
-    cp -r Views $PACKAGE_DIR/
-fi
+# The packer targets .NET 8; let it run on whatever newer runtime the SDK image ships.
+DOTNET_ROLL_FORWARD=Major "$PACKER_DIR/BTCPayServer.PluginPacker" "$PUBLISH_DIR" "$PROJECT" "$PACKAGE_DIR"
 
-# Create the BTCPay plugin package
-cd bin/Release
-rm -f $PLUGIN_DIR.btcpay
-mkdir -p tmp
-cp -r package/* tmp/
-cd tmp
-zip -r ../$PLUGIN_DIR.btcpay .
-cd ../..
-
-# Clean up
-rm -rf bin/Release/tmp
-
-echo "Plugin package created at bin/Release/BTCPayServer.Plugins.Flash.btcpay" 
+# PluginPacker writes <version>/<name>.btcpay; expose it at a stable path for releases.
+PKG=$(find "$PACKAGE_DIR" -name "$PROJECT.btcpay" | head -1)
+cp "$PKG" "$OUT/$PROJECT.btcpay"
+echo "Plugin package created at $OUT/$PROJECT.btcpay"
