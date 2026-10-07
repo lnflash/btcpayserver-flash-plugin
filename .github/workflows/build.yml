@@ -1,0 +1,87 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/dotnet/sdk:10.0
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Test the release gate
+        run: ./release-check.test.sh
+      - name: Build .btcpay the way the Plugin Builder does
+        run: ./build-package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BTCPayServer.Plugins.Flash.btcpay
+          path: |
+            bin/Release/BTCPayServer.Plugins.Flash.btcpay
+            bin/Release/package/**/*.btcpay.json
+      - name: Check tag matches packaged version and extract release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./release-check.sh "${GITHUB_REF_NAME}"
+      - name: Attach package to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            bin/Release/BTCPayServer.Plugins.Flash.btcpay
+            bin/Release/package/*/*/BTCPayServer.Plugins.Flash.btcpay.json
+
+  smoke:
+    # The build job proves the package compiles. This proves BTCPay 2.4 actually loads it.
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: BTCPayServer.Plugins.Flash.btcpay
+          path: artifact
+      - name: Unpack the plugin where BTCPay looks for it
+        run: |
+          mkdir -p plugins/BTCPayServer.Plugins.Flash
+          unzip -q artifact/BTCPayServer.Plugins.Flash.btcpay -d plugins/BTCPayServer.Plugins.Flash
+          chmod -R a+rwX plugins
+      - name: Start postgres and BTCPay 2.4.5 with the plugin
+        run: |
+          docker network create flash-smoke
+          docker run -d --name smoke-pg --network flash-smoke -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16
+          sleep 8
+          docker run -d --name smoke-btcpay --network flash-smoke \
+            -v "$PWD/plugins:/root/.btcpayserver/Plugins" \
+            -e BTCPAY_NETWORK=regtest -e BTCPAY_BIND=0.0.0.0:49392 -e BTCPAY_CHAINS=btc \
+            -e BTCPAY_POSTGRES="User ID=postgres;Host=smoke-pg;Port=5432;Database=btcpay" \
+            -e BTCPAY_BTCEXPLORERURL=http://nbx:32838/ \
+            btcpayserver/btcpayserver:2.4.5
+      - name: Wait for the plugin to initialize
+        run: |
+          for i in $(seq 1 30); do
+            log=$(docker logs smoke-btcpay 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+            if grep -q "Flash Plugin: Initialization completed successfully" <<<"$log"; then
+              grep -E "Running plugin BTCPayServer.Plugins.Flash|Flash Plugin:" <<<"$log"
+              exit 0
+            fi
+            if grep -qiE "Plugin BTCPayServer.Plugins.Flash.*(disabled|failed|error)|Unhandled exception" <<<"$log"; then
+              echo "$log" | tail -60; exit 1
+            fi
+            sleep 5
+          done
+          echo "Plugin did not initialize in time"; docker logs smoke-btcpay 2>&1 | tail -80; exit 1
+      - name: Logs on failure
+        if: failure()
+        run: docker logs smoke-btcpay 2>&1 | tail -120 || true

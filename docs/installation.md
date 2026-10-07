@@ -29,7 +29,7 @@ The key looks like `fk_<keyId>_<secret>` and is shown **once**. Store it somewhe
 > [!IMPORTANT]
 > Keep the file name exactly `BTCPayServer.Plugins.Flash.btcpay`. BTCPay unpacks a plugin into a folder named after the file, so a renamed file installs *next to* the old version instead of replacing it, and the old one keeps running.
 
-Requires BTCPay Server 2.x. Tested on 2.4.5.
+Requires BTCPay Server 2.4.0 or later (BTCPay moved to .NET 10 in 2.4.0). On BTCPay 2.0 to 2.3, install [v1.6.6](https://github.com/lnflash/btcpayserver-flash-plugin/releases/tag/v1.6.6), the last release built for .NET 8.
 
 ## 3. Connect a store
 

@@ -23,22 +23,56 @@ Start with `Lightning/FlashLightningClient.cs`, which BTCPay calls. It delegates
 
 ## Building
 
-The project targets **.NET 8** and references the BTCPay Server source at `../btcpayserver`. Use BTCPay Server **v2.1.1**; later versions target .NET 10 and won't build this project. A plugin built against 2.1.1 runs on current BTCPay 2.x.
+The project targets **.NET 10** and references the BTCPay Server source through the git submodule at `submodules/btcpayserver`, pinned to **v2.4.5**, the version it is built and smoke-tested against. BTCPay 2.3 and earlier target .NET 8 and will not build this project (use the `v1.6.6` tag for those).
 
 ```sh
-git clone --depth 1 --branch v2.1.1 https://github.com/btcpayserver/btcpayserver.git ../btcpayserver
+git clone --recurse-submodules https://github.com/lnflash/btcpayserver-flash-plugin.git
+cd btcpayserver-flash-plugin
 ./build-package.sh        # → bin/Release/BTCPayServer.Plugins.Flash.btcpay
 ```
 
-Without a local .NET 8 SDK, build in Docker from the parent directory:
+If you cloned without `--recurse-submodules`: `git submodule update --init --depth 1`.
+
+`build-package.sh` runs the same steps as the BTCPay Plugin Builder: `dotnet restore`, `dotnet publish`, then BTCPay's `PluginPacker`, which reads `Identifier`, `Version` and `Dependencies` from the compiled `FlashPlugin` class and writes the `.btcpay` next to a `.btcpay.json` manifest. `manifest.json` in the repository root is informational; the packer does not read it.
+
+Without a local .NET 10 SDK, build in Docker:
 
 ```sh
-docker run --rm \
-  -v "$PWD/btcpayserver:/src/btcpayserver" \
-  -v "$PWD/btcpayserver-flash-plugin:/src/plugin" \
-  -w /src/plugin mcr.microsoft.com/dotnet/sdk:8.0 \
-  bash -c 'apt-get -qq update && apt-get -qq install -y zip && ./build-package.sh'
+docker run --rm -v "$PWD:/build/repo" -w /build/repo \
+  -e HOME=/build/home -e DOTNET_CLI_HOME=/build/home \
+  mcr.microsoft.com/dotnet/sdk:10.0 bash -c 'mkdir -p /build/home && ./build-package.sh'
 ```
+
+### Smoke test on a disposable BTCPay
+
+```sh
+mkdir -p /tmp/flash-plugin/BTCPayServer.Plugins.Flash
+unzip bin/Release/BTCPayServer.Plugins.Flash.btcpay -d /tmp/flash-plugin/BTCPayServer.Plugins.Flash
+docker network create flash-smoke
+docker run -d --name smoke-pg --network flash-smoke -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16
+docker run -d --name smoke-btcpay --network flash-smoke -p 127.0.0.1:14142:49392 \
+  -v /tmp/flash-plugin:/root/.btcpayserver/Plugins \
+  -e BTCPAY_NETWORK=regtest -e BTCPAY_BIND=0.0.0.0:49392 -e BTCPAY_CHAINS=btc \
+  -e BTCPAY_POSTGRES="User ID=postgres;Host=smoke-pg;Port=5432;Database=btcpay" \
+  -e BTCPAY_BTCEXPLORERURL=http://nbx:32838/ \
+  btcpayserver/btcpayserver:2.4.5
+docker logs smoke-btcpay 2>&1 | grep -i "plugin"   # expect "Running plugin BTCPayServer.Plugins.Flash - <version>"
+```
+
+Then open http://127.0.0.1:14142. NBXplorer is intentionally absent; the Lightning settings page is enough to check the plugin registered.
+
+## Plugin Builder
+
+To publish through [plugin-builder.btcpayserver.org](https://plugin-builder.btcpayserver.org), the plugin entry's settings are:
+
+| Setting | Value |
+|---|---|
+| Git repository | `https://github.com/lnflash/btcpayserver-flash-plugin` |
+| Git ref | the release tag, e.g. `v1.7.0` |
+| Plugin directory | *(empty, the csproj is at the root)* |
+| Build configuration | `Release` |
+
+The builder does a shallow recursive clone and runs `dotnet publish` in a `dotnet/sdk:10.0` image with network access limited to nuget.org, which this layout satisfies. See the [BTCPay publishing guide](https://docs.btcpayserver.org/Developers/plugins/publishing/) for account verification and the listing request.
 
 ## Releasing
 
@@ -51,12 +85,13 @@ docker run --rm \
    | `FlashPlugin.cs` | `override Version` |
 
 2. Add an entry to [CHANGELOG.md](../CHANGELOG.md).
-3. Build the package, then publish it as a GitHub release. Keep the asset name exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
+3. Push the tag. CI ([`.github/workflows/build.yml`](../.github/workflows/build.yml)) builds the package in the same `dotnet/sdk:10.0` image the Plugin Builder uses, runs `release-check.sh` (the build fails if the tag does not match the compiled version or CHANGELOG has no entry for it), creates the GitHub release (notes from the matching CHANGELOG section) and attaches `BTCPayServer.Plugins.Flash.btcpay` plus its `.btcpay.json` manifest. The asset name must stay exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
 
    ```sh
-   gh release create v1.6.6 bin/Release/BTCPayServer.Plugins.Flash.btcpay \
-     --title "v1.6.6" --notes-file <(sed -n '/## \[1.6.6\]/,/## \[/p' CHANGELOG.md | sed '$d')
+   git tag v1.7.0 && git push origin v1.7.0
    ```
+
+   Do not upload a laptop-built package to the release; the CI artifact is the one users install, so what ships is reproducible from the tag.
 
 Packages are not committed to the repository. `bin/` and `obj/` are ignored.
 

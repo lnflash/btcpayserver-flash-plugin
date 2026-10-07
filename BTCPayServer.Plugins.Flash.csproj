@@ -1,19 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>10</LangVersion>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
     <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
     <PreserveCompilationContext>false</PreserveCompilationContext>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <!-- The BTCPay Server submodule lives inside the project folder; keep its files out of this project. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);submodules/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- Plugin specific properties -->
   <PropertyGroup>
     <Product>Flash</Product>
     <Description>Flash integration with LNURL and Lightning Address support</Description>
-    <Version>1.6.6</Version>
+    <Version>1.7.0</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <RootNamespace>BTCPayServer.Plugins.Flash</RootNamespace>
   </PropertyGroup>
@@ -28,7 +30,7 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../btcpayserver/BTCPayServer/BTCPayServer.csproj" />
+    <ProjectReference Include="submodules/btcpayserver/BTCPayServer/BTCPayServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,12 +38,12 @@
     <Content Include="Views/**/*.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="_ViewImports.cshtml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="wwwroot/**/*" Exclude="**/.DS_Store" CopyToOutputDirectory="PreserveNewest" />
     
     <EmbeddedResource Include="Views/**/*.cshtml" />
     <EmbeddedResource Include="_ViewImports.cshtml" />
     <EmbeddedResource Include="manifest.json" />
-    <EmbeddedResource Include="wwwroot/**/*" />
+    <EmbeddedResource Include="wwwroot/**/*" Exclude="**/.DS_Store" />
     
     <None Remove="plugin-manifest.json" />
   </ItemGroup>
@@ -52,6 +54,6 @@
     <PackageReference Include="LNURL" Version="0.0.36" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
     <PackageReference Include="Polly" Version="8.2.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
   </ItemGroup>
 </Project>

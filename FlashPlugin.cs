@@ -34,11 +34,11 @@ namespace BTCPayServer.Plugins.Flash
         public override string Identifier => "BTCPayServer.Plugins.Flash";
         public override string Name => "Flash";
         public override string Description => "Integration with Flash wallet featuring full LNURL, Lightning Address and Boltcard support.";
-        public override Version Version => new Version(1, 6, 6);
+        public override Version Version => new Version(1, 7, 0);
 
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies => new[]
         {
-            new IBTCPayServerPlugin.PluginDependency { Identifier = "BTCPayServer", Condition = ">=2.0.0" }
+            new IBTCPayServerPlugin.PluginDependency { Identifier = "BTCPayServer", Condition = ">=2.4.0" }
         };
 
         public override void Execute(IServiceCollection applicationBuilder)
