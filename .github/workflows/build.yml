@@ -28,12 +28,9 @@ jobs:
           path: |
             bin/Release/BTCPayServer.Plugins.Flash.btcpay
             bin/Release/package/**/*.btcpay.json
-      - name: Extract release notes from CHANGELOG
+      - name: Check tag matches packaged version and extract release notes
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          sed -n "/## \[${VER}\]/,/## \[/p" CHANGELOG.md | sed '$d' > release-notes.md
-          test -s release-notes.md || echo "No CHANGELOG entry for ${VER}" >&2
+        run: ./release-check.sh "${GITHUB_REF_NAME}"
       - name: Attach package to the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

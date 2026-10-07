@@ -85,7 +85,7 @@ The builder does a shallow recursive clone and runs `dotnet publish` in a `dotne
    | `FlashPlugin.cs` | `override Version` |
 
 2. Add an entry to [CHANGELOG.md](../CHANGELOG.md).
-3. Push the tag. CI ([`.github/workflows/build.yml`](../.github/workflows/build.yml)) builds the package in the same `dotnet/sdk:10.0` image the Plugin Builder uses, creates the GitHub release (notes from the matching CHANGELOG section) and attaches `BTCPayServer.Plugins.Flash.btcpay` plus its `.btcpay.json` manifest. The asset name must stay exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
+3. Push the tag. CI ([`.github/workflows/build.yml`](../.github/workflows/build.yml)) builds the package in the same `dotnet/sdk:10.0` image the Plugin Builder uses, runs `release-check.sh` (the build fails if the tag does not match the compiled version or CHANGELOG has no entry for it), creates the GitHub release (notes from the matching CHANGELOG section) and attaches `BTCPayServer.Plugins.Flash.btcpay` plus its `.btcpay.json` manifest. The asset name must stay exactly `BTCPayServer.Plugins.Flash.btcpay` (see [Installation](installation.md#2-install-the-plugin)):
 
    ```sh
    git tag v1.7.0 && git push origin v1.7.0
